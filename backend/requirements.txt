@@ -1,0 +1,63 @@
+# FastAPI and web framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# Core ML/AI dependencies (from your notebook)
+numpy==1.26.4
+scipy==1.13.1
+scikit-learn==1.4.2
+transformers==4.40.2
+tokenizers==0.19.1
+torch>=2.0.0
+torchaudio>=2.0.0
+
+# Audio processing
+faster-whisper>=1.1.1
+stable-ts
+whisperx
+pyannote.audio==3.1.1
+pyannote.core>=5.0.0
+pyannote.database>=5.0.1
+pyannote.metrics>=3.2
+pyannote.pipeline>=3.0.1
+
+# Audio processing dependencies
+ctranslate2>=3.0,<5
+speechbrain
+asteroid-filterbanks
+lightning
+semver
+tensorboardX
+torch-audiomentations
+pytorch-metric-learning
+
+# Video processing
+opencv-python-headless
+Pillow
+ffmpeg-python
+
+# Text processing
+nltk
+pandas
+tqdm
+spacy
+datasets
+accelerate
+
+# Vector store and embeddings
+sentence-transformers==2.7.0
+faiss-cpu
+networkx
+
+# Utilities
+pyyaml
+requests
+aiofiles
+
+# AI/LLM APIs
+google-generativeai>=0.8.0
+
+# For production deployment
+redis>=4.0.0
+celery>=5.0.0

@@ -1,0 +1,44 @@
+# Simplified requirements for easier installation
+# Install in stages to avoid conflicts
+
+# Core dependencies
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+aiohttp
+
+# ML Core
+numpy==1.26.4
+torch>=2.0.0
+transformers==4.40.2
+tokenizers==0.19.1
+
+# Audio processing (compatible versions)
+faster-whisper>=1.1.1
+
+# Video processing
+opencv-python-headless
+Pillow
+ffmpeg-python
+
+# Text processing
+nltk
+spacy
+pandas
+tqdm
+
+# Utilities
+requests
+pyyaml
+networkx
+
+# Vector store
+sentence-transformers==2.7.0
+faiss-cpu
+
+# Production
+redis>=4.0.0
+
+# Install these separately after main requirements:
+# pip install --no-cache-dir scipy==1.13.1 scikit-learn==1.4.2
+# pip install --no-cache-dir --no-build-isolation whisperx pyannote.audio==3.1.1
