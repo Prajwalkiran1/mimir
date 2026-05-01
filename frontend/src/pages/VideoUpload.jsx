@@ -23,6 +23,7 @@ import { apiService } from '../services/api';
 
 const VideoUpload = () => {
   const [videoFile, setVideoFile] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStep, setProcessingStep] = useState('');
   const [results, setResults] = useState(null);
@@ -42,6 +43,16 @@ const VideoUpload = () => {
 
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
+    if (file && file.type.startsWith('video/')) {
+      setVideoFile(file);
+      setResults(null);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files[0];
     if (file && file.type.startsWith('video/')) {
       setVideoFile(file);
       setResults(null);
@@ -171,9 +182,12 @@ const VideoUpload = () => {
         filename = `subtitles_${videoFile.name.replace(/\.[^/.]+$/, '')}.srt`;
         break;
       case 'summary':
-        content = typeof results.summary === 'string' 
-          ? results.summary 
-          : results.summary?.summary || 'No summary available';
+        content = typeof results.summary === 'string'
+          ? results.summary
+          : (results.summary?.text || 'No summary available');
+        if (results.summary?.key_points?.length) {
+          content += '\n\nKey Points:\n' + results.summary.key_points.map(p => `• ${p}`).join('\n');
+        }
         filename = `summary_${videoFile.name.replace(/\.[^/.]+$/, '')}.txt`;
         break;
       case 'keyframes':
@@ -245,7 +259,14 @@ const VideoUpload = () => {
 
         {!videoFile && (
           <div className="max-w-2xl mx-auto">
-            <div className="border-2 border-dashed border-blue-400 rounded-2xl p-12 text-center bg-white hover:bg-gray-50 transition-colors">
+            <div
+              className={`border-2 border-dashed rounded-2xl p-12 text-center transition-colors ${
+                isDragging ? 'border-yellow-400 bg-yellow-50' : 'border-blue-400 bg-white hover:bg-gray-50'
+              }`}
+              onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={handleDrop}
+            >
               <Upload className="w-16 h-16 text-blue-600 mx-auto mb-4" />
               <h3 className="text-xl font-semibold text-gray-800 mb-2">Upload Your Video</h3>
               <p className="text-gray-600 mb-4">Drag and drop or click to select</p>

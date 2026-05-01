@@ -149,25 +149,29 @@ async def list_tasks():
     tasks = task_manager.get_all_tasks()
     return {"tasks": [task.to_dict() for task in tasks]}
 
-async def process_video_task(task_id: str, video_path: str, options: ProcessingOptions):
-    """Background task for video processing"""
+def process_video_task(task_id: str, video_path: str, options: ProcessingOptions):
+    """Background task for video processing - runs in thread pool so event loop stays free for polls"""
+    import asyncio
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     try:
-        # Update task status
         task_manager.update_status(task_id, "processing", "Initializing pipeline...", 5)
-        
-        # Process video
-        results = await pipeline_orchestrator.process_video(
-            video_path=video_path,
-            options=options.model_dump(),
-            progress_callback=lambda step, progress: task_manager.update_status(
-                task_id, "processing", step, progress
+
+        results = loop.run_until_complete(
+            pipeline_orchestrator.process_video(
+                video_path=video_path,
+                options=options.model_dump(),
+                progress_callback=lambda step, progress: task_manager.update_status(
+                    task_id, "processing", step, progress
+                )
             )
         )
-        
-        # Update final status
+
         task_manager.update_status(task_id, "completed", "Processing completed!", 100)
         task_manager.set_results(task_id, results)
-        
+
     except Exception as e:
         logger.error(f"Processing failed for task {task_id}: {str(e)}")
         task_manager.update_status(task_id, "failed", f"Processing failed: {str(e)}", 0)
+    finally:
+        loop.close()

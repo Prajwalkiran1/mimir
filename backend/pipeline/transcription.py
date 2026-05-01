@@ -1,6 +1,7 @@
 """Phase 1: Video Transcription Component"""
 
 import os
+import asyncio
 import logging
 from typing import Dict, Any, Optional
 import torch
@@ -149,7 +150,8 @@ class TranscriptionEngine:
     def _extract_audio(self, video_path: str) -> str:
         """Extract audio from video file"""
         try:
-            audio_path = video_path.replace('.mp4', '.wav').replace('.avi', '.wav').replace('.mov', '.wav')
+            base = os.path.splitext(video_path)[0]
+            audio_path = base + '_audio.wav'
             
             # Ensure audio directory exists
             os.makedirs(os.path.dirname(audio_path), exist_ok=True)

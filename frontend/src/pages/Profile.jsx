@@ -180,8 +180,8 @@ const Profile = () => {
           <div className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-purple-500">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-gray-600 text-sm">Downloads</p>
-                <p className="text-2xl font-bold text-mimir-blue">128</p>
+                <p className="text-gray-600 text-sm">Total Tasks</p>
+                <p className="text-2xl font-bold text-mimir-blue">{tasks.length}</p>
               </div>
               <Download className="w-8 h-8 text-mimir-gold" />
             </div>
@@ -295,6 +295,9 @@ const Profile = () => {
                 </div>
 
                 <div className="space-y-3">
+                  {filteredGenerations.length === 0 && (
+                    <p className="text-center text-gray-500 py-8">No videos processed yet — upload your first video to get started.</p>
+                  )}
                   {filteredGenerations.map((generation) => (
                     <div key={generation.id} className="bg-gray-50 rounded-lg p-4 hover:bg-gray-100 transition-colors">
                       <div className="flex items-center justify-between">

@@ -98,7 +98,7 @@ class ApiService {
   }
 
   // Poll for status updates
-  async pollStatus(taskId, onUpdate, interval = 2000) {
+  async pollStatus(taskId, onUpdate, interval = 1000) {
     console.log(`Starting polling for task ${taskId}`);
     let pollCount = 0;
     const maxPolls = 300; // Maximum 10 minutes of polling
