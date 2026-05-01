@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -59,6 +60,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Serve uploaded files (videos, keyframes, subtitles) for the frontend
+os.makedirs(config.upload_dir, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=config.upload_dir), name="uploads")
 
 # Include API routes
 app.include_router(auth_router)
