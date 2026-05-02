@@ -343,6 +343,185 @@ const PageStyles = () => (
 
     .option-desc { font-size: 0.76rem; color: var(--text-dim); line-height: 1.5; padding-left: 40px; }
 
+    /* ── Results: hero video + full-width section stack ── */
+    .results-hero {
+      margin-bottom: 22px;
+      border-radius: var(--radius-xl);
+      overflow: hidden;
+      background: var(--glass-bg);
+      backdrop-filter: blur(28px) saturate(160%);
+      -webkit-backdrop-filter: blur(28px) saturate(160%);
+      border: 1px solid var(--glass-border);
+      box-shadow: inset 0 1.5px 0 var(--glass-shine), 0 24px 64px rgba(0,0,0,0.45);
+      animation: riseIn 0.55s cubic-bezier(0.23,1,0.32,1) both;
+      position: relative;
+    }
+    .results-hero::before {
+      content: '';
+      position: absolute; top: 0; left: 12%; right: 12%; height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(200,255,245,0.32), transparent);
+      pointer-events: none; z-index: 1;
+    }
+    .results-hero-video {
+      width: 100%; aspect-ratio: 16 / 9; background: #000;
+      display: block; outline: none;
+    }
+
+    .results-stack {
+      display: flex; flex-direction: column; gap: 18px;
+      margin-bottom: 28px;
+    }
+
+    .result-section {
+      background: var(--glass-bg);
+      backdrop-filter: blur(28px) saturate(160%);
+      -webkit-backdrop-filter: blur(28px) saturate(160%);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-xl);
+      padding: 26px 30px;
+      position: relative;
+      overflow: hidden;
+      box-shadow: inset 0 1.5px 0 var(--glass-shine), 0 16px 40px rgba(0,0,0,0.32);
+      animation: riseIn 0.55s cubic-bezier(0.23,1,0.32,1) both;
+    }
+    .result-section::before {
+      content: '';
+      position: absolute; top: 0; left: 12%; right: 12%; height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(200,255,245,0.22), transparent);
+      pointer-events: none;
+    }
+
+    .rs-head {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      margin-bottom: 18px; gap: 16px; flex-wrap: wrap;
+    }
+    .rs-head-left { display: flex; align-items: center; gap: 12px; }
+    .rs-head-icon {
+      width: 36px; height: 36px; border-radius: 11px;
+      background: rgba(100,210,200,0.08);
+      border: 1px solid var(--glass-border);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .rs-head-text { display: flex; flex-direction: column; gap: 2px; }
+    .rs-title {
+      font-family: var(--font-serif); font-size: 1.35rem;
+      color: var(--white); line-height: 1.15; letter-spacing: -0.005em;
+      font-weight: 400;
+    }
+    .rs-subtitle {
+      font-size: 0.78rem; color: var(--text-dim); font-weight: 300;
+    }
+    .rs-tools {
+      display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+    }
+
+    .rs-body p {
+      font-size: 0.95rem; color: var(--text); line-height: 1.78;
+      font-weight: 300;
+    }
+    .rs-body pre {
+      font-family: 'Menlo', 'Consolas', monospace; font-size: 0.83rem;
+      color: var(--text); white-space: pre-wrap; word-wrap: break-word;
+      line-height: 1.7; max-height: 380px; overflow-y: auto;
+      padding-right: 6px;
+    }
+
+    /* Topic section — gold-accented to differentiate */
+    .topic-section { border-color: rgba(201, 168, 76, 0.22); }
+    .topic-section::before {
+      background: linear-gradient(90deg, transparent, rgba(232, 200, 110, 0.32), transparent);
+    }
+    .topic-section .rs-head-icon {
+      background: rgba(201, 168, 76, 0.08);
+      border-color: rgba(201, 168, 76, 0.25);
+    }
+
+    /* Key points list — bigger, breathy spacing */
+    .key-points-list {
+      margin-top: 22px;
+      padding-top: 20px;
+      border-top: 1px solid rgba(100, 210, 200, 0.1);
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .key-points-eyebrow {
+      font-size: 0.62rem; font-weight: 500; letter-spacing: 0.22em;
+      text-transform: uppercase; color: var(--teal-dim);
+      margin-bottom: 8px;
+    }
+    .topic-section .key-points-eyebrow { color: rgba(201, 168, 76, 0.7); }
+    .topic-section .key-points-list { border-top-color: rgba(201, 168, 76, 0.12); }
+    .topic-section .key-bullet { background: rgba(201, 168, 76, 0.7); }
+
+    /* Bigger keyframe thumbnails */
+    .kf-strip {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 14px;
+    }
+    .kf-cell-btn {
+      position: relative; border-radius: 14px; overflow: hidden;
+      border: 1px solid var(--glass-border);
+      background: rgba(0, 0, 0, 0.5);
+      aspect-ratio: 16 / 9;
+      cursor: pointer; padding: 0; outline: none;
+      transition: all 0.28s cubic-bezier(0.23, 1, 0.32, 1);
+      font-family: inherit;
+    }
+    .kf-cell-btn:hover {
+      transform: translateY(-3px) scale(1.025);
+      border-color: rgba(100, 210, 200, 0.5);
+      box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5);
+    }
+    .kf-cell-btn img {
+      width: 100%; height: 100%; object-fit: cover; display: block;
+      transition: transform 0.5s ease;
+    }
+    .kf-cell-btn:hover img { transform: scale(1.06); }
+    .kf-cell-overlay {
+      position: absolute; left: 0; right: 0; bottom: 0;
+      padding: 22px 12px 10px;
+      background: linear-gradient(180deg, transparent, rgba(6, 18, 18, 0.92));
+      display: flex; align-items: center; justify-content: space-between;
+      pointer-events: none;
+    }
+    .kf-cell-time {
+      font-family: 'Menlo', 'Consolas', monospace; font-size: 0.78rem;
+      color: var(--white); font-weight: 500;
+    }
+    .kf-cell-jump {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 0.62rem; font-weight: 600; letter-spacing: 0.16em;
+      color: var(--teal); text-transform: uppercase;
+      opacity: 0; transition: opacity 0.2s;
+    }
+    .kf-cell-btn:hover .kf-cell-jump { opacity: 1; }
+
+    /* Collapsible "raw subtitles" footer */
+    .collapsible-section {
+      background: rgba(5, 18, 18, 0.45);
+      border: 1px solid var(--glass-border);
+      border-radius: 14px;
+      animation: riseIn 0.55s cubic-bezier(0.23,1,0.32,1) both;
+    }
+    .collapsible-toggle {
+      display: flex; align-items: center; justify-content: space-between;
+      width: 100%; background: none; border: none; cursor: pointer;
+      font-family: var(--font-sans); font-size: 0.84rem; color: var(--text);
+      font-weight: 400; padding: 14px 18px;
+    }
+    .collapsible-toggle:hover { color: var(--teal); }
+    .collapsible-content {
+      padding: 0 18px 16px;
+      border-top: 1px solid var(--glass-border);
+      padding-top: 14px;
+    }
+    .collapsible-content pre {
+      font-family: 'Menlo', 'Consolas', monospace; font-size: 0.78rem;
+      color: var(--text); white-space: pre-wrap; word-wrap: break-word;
+      max-height: 280px; overflow-y: auto; line-height: 1.65;
+      margin: 0;
+    }
+
     /* ── Customize panel ── */
     .customize-section {
       background: var(--glass-bg);
@@ -713,7 +892,6 @@ const getPhases = (options) => {
   if (options.transcript) p.push({ id: 'transcription', label: 'Transcribing audio', keywords: ['transcrib', 'audio', 'speech', 'whisper', 'analyzing audio', 'loading transcription', 'processing speech', 'formatting transcription'] });
   if (options.keyframes) p.push({ id: 'keyframes', label: 'Extracting keyframes', keywords: ['keyframe', 'frame', 'visual', 'cluster'] });
   if (options.summary || options.topicBased) p.push({ id: 'summary', label: 'Generating summary', keywords: ['summar', 'gemini', 'topic', 'ai summary', 'generating ai', 'summary complete', 'generating summary'] });
-  if (options.rag) p.push({ id: 'rag', label: 'Indexing knowledge', keywords: ['rag', 'chunk', 'graph', 'vector', 'index', 'retrieval', 'semantic'] });
   if (options.subtitles) p.push({ id: 'subtitles', label: 'Generating subtitles', keywords: ['subtitle', 'srt', 'caption', 'sync'] });
   return p;
 };
@@ -729,12 +907,11 @@ const PHASE_MESSAGES = {
 };
 
 const OPTION_META = [
-  { key: 'subtitles',  icon: Clock,     label: 'Subtitles',      desc: 'Time-synced SRT captions' },
+  { key: 'subtitles',  icon: Clock,     label: 'Subtitles',      desc: 'Time-synced captions for the player' },
   { key: 'transcript', icon: FileText,  label: 'Transcript',     desc: 'Full text transcription' },
-  { key: 'summary',    icon: Brain,     label: 'AI Summary',     desc: 'Powered by Gemini' },
-  { key: 'keyframes',  icon: Image,     label: 'Keyframes',      desc: 'Important visual moments' },
-  { key: 'rag',        icon: Search,    label: 'RAG Index',      desc: 'Semantic search & Q&A' },
-  { key: 'topicBased', icon: Languages, label: 'Topic Analysis', desc: 'Focus on a specific topic' },
+  { key: 'summary',    icon: Brain,     label: 'AI Summary',     desc: 'Concise overview powered by Gemini' },
+  { key: 'keyframes',  icon: Image,     label: 'Keyframes',      desc: 'Click to jump to the moment' },
+  { key: 'topicBased', icon: Languages, label: 'Topic Analysis', desc: 'Focus the summary on a specific topic' },
 ];
 
 /* ── Skeleton ── */
@@ -761,7 +938,7 @@ const VideoUpload = () => {
   const [results, setResults]               = useState(null);
   const [selectedOptions, setSelectedOptions] = useState({
     subtitles: true, transcript: true, summary: true,
-    keyframes: false, rag: false, topicBased: false,
+    keyframes: false, topicBased: false,
   });
   const [selectedTopic, setSelectedTopic]   = useState('');
   const [summaryLength, setSummaryLength]   = useState('medium'); // short | medium | long
@@ -772,6 +949,15 @@ const VideoUpload = () => {
   const [currentPhaseId, setCurrentPhaseId]       = useState('init');
   const [completedPhaseIds, setCompletedPhaseIds] = useState([]);
   const [showRawSrt, setShowRawSrt]               = useState(false);
+  const videoRef = useRef(null);
+
+  const seekToTimestamp = (ts) => {
+    const el = videoRef.current;
+    if (!el || typeof ts !== 'number') return;
+    el.currentTime = Math.max(0, ts);
+    el.play().catch(() => {});
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   useEffect(() => {
     if (!isProcessing) { setPhaseMessageIdx(0); setCurrentPhaseId('init'); setCompletedPhaseIds([]); return; }
@@ -816,7 +1002,7 @@ const VideoUpload = () => {
       const options = {
         transcript: selectedOptions.transcript, summary: selectedOptions.summary,
         subtitles: selectedOptions.subtitles, keyframes: selectedOptions.keyframes,
-        rag: selectedOptions.rag, topic_based: selectedOptions.topicBased,
+        rag: false, topic_based: selectedOptions.topicBased,
         topic: selectedOptions.topicBased ? selectedTopic : null,
         download_format: subtitleFormat, summary_length: summaryLength, use_gpu: true,
       };
@@ -840,7 +1026,7 @@ const VideoUpload = () => {
             keyframes: status.results?.keyframes?.keyframes
               ? status.results.keyframes.keyframes.map(kf => ({ ...kf, path: kf.frame_path || kf.path || 'unknown' }))
               : [],
-            rag: status.results?.rag || null,
+            topic_analysis: status.results?.topic_analysis || null,
             video_url: status.results?.video_url || null,
             subtitles_vtt_url: status.results?.subtitles_vtt_url || null,
             task_id: status.results?.task_id || response.task_id,
@@ -869,7 +1055,12 @@ const VideoUpload = () => {
       case 'keyframes':
         content = (Array.isArray(results.keyframes) ? results.keyframes : []).map(kf => `${kf.timestamp || kf.time}: ${kf.description || 'Keyframe'}`).join('\n');
         filename = `keyframes_${videoFile.name.replace(/\.[^/.]+$/, '')}.txt`; break;
-      case 'rag': content = results.rag?.summary?.summary || ''; filename = `rag_summary_${videoFile.name.replace(/\.[^/.]+$/, '')}.txt`; break;
+      case 'topic':
+        const ta = results.topic_analysis || {};
+        content = `Topic: ${ta.topic || ''}\n\n${ta.summary || ''}`;
+        if (ta.key_points?.length) content += '\n\nKey mentions:\n' + ta.key_points.map(p => `• ${p}`).join('\n');
+        filename = `topic_${videoFile.name.replace(/\.[^/.]+$/, '')}.txt`;
+        break;
     }
     const blob = new Blob([content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -880,7 +1071,7 @@ const VideoUpload = () => {
   const resetUpload = () => {
     setVideoFile(null); setResults(null); setIsProcessing(false); setError(null);
     setSelectedTopic(''); setSummaryLength('medium'); setSubtitleFormat('srt');
-    setSelectedOptions({ subtitles: true, transcript: true, summary: true, keyframes: false, rag: false, topicBased: false });
+    setSelectedOptions({ subtitles: true, transcript: true, summary: true, keyframes: false, topicBased: false });
   };
 
   const activePhases = getPhases(selectedOptions);
@@ -1123,11 +1314,11 @@ const VideoUpload = () => {
                 </div>
 
                 <div className="skeleton-grid">
+                  {selectedOptions.subtitles && <SkeletonCard lines={9} />}
+                  {selectedOptions.summary && <SkeletonCard lines={5} />}
+                  {selectedOptions.topicBased && <SkeletonCard lines={5} />}
+                  {selectedOptions.keyframes && <SkeletonCard lines={5} />}
                   {selectedOptions.transcript && <SkeletonCard lines={8} />}
-                  {selectedOptions.subtitles && <SkeletonCard lines={7} />}
-                  {(selectedOptions.summary || selectedOptions.topicBased) && <SkeletonCard lines={5} />}
-                  {selectedOptions.keyframes && <SkeletonCard lines={4} />}
-                  {selectedOptions.rag && <SkeletonCard lines={5} />}
                 </div>
               </div>
             )}
@@ -1147,178 +1338,228 @@ const VideoUpload = () => {
               </div>
             </div>
 
-            <div className="results-grid">
-              {selectedOptions.transcript && (
-                <div className="result-card">
-                  <div className="result-header">
-                    <div className="result-title">
-                      <FileText size={15} color="rgba(100,210,200,0.8)" />
-                      Transcript
-                    </div>
-                    <button onClick={() => handleDownload('transcript')} className="result-dl"><Download size={14} /></button>
-                  </div>
-                  <div className="result-body"><pre>{results.transcript}</pre></div>
-                </div>
-              )}
+            {/* ── Hero: video player ────────────────────────────────────────── */}
+            {results.video_url && (
+              <div className="results-hero">
+                <video
+                  ref={videoRef}
+                  controls
+                  preload="metadata"
+                  crossOrigin="anonymous"
+                  className="results-hero-video"
+                >
+                  <source src={`${API_BASE_URL}${results.video_url}`} />
+                  {results.subtitles_vtt_url && (
+                    <track
+                      kind="subtitles"
+                      label="English"
+                      srcLang="en"
+                      src={`${API_BASE_URL}${results.subtitles_vtt_url}`}
+                      default
+                    />
+                  )}
+                  Your browser does not support inline video playback.
+                </video>
+              </div>
+            )}
 
-              {selectedOptions.subtitles && (
-                <div className="result-card" style={{ gridColumn: '1 / -1' }}>
-                  <div className="result-header">
-                    <div className="result-title">
-                      <Play size={15} color="rgba(100,210,200,0.8)" />
-                      Video preview with subtitles
+            {/* ── Stack of full-width sections ──────────────────────────────── */}
+            <div className="results-stack">
+
+              {/* AI summary */}
+              {selectedOptions.summary && results.summary && (
+                <section className="result-section">
+                  <div className="rs-head">
+                    <div className="rs-head-left">
+                      <div className="rs-head-icon">
+                        <Brain size={16} color="rgba(100,210,200,0.9)" />
+                      </div>
+                      <div className="rs-head-text">
+                        <h3 className="rs-title">AI summary</h3>
+                        <span className="rs-subtitle">
+                          {(results.summary.summary_length || 'medium')[0].toUpperCase() + (results.summary.summary_length || 'medium').slice(1)} length
+                          {results.summary.word_count ? ` · ${results.summary.word_count} words` : ''}
+                        </span>
+                      </div>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span className="badge badge-dim">{subtitleFormat.toUpperCase()}</span>
-                      <button onClick={() => handleDownload('subtitles')} className="result-dl" title="Download subtitles">
+                    <div className="rs-tools">
+                      <span className={`badge ${results.summary.summary_type === 'gemini' ? 'badge-teal' : 'badge-dim'}`}>
+                        {results.summary.summary_type === 'gemini' ? 'Gemini' : 'Extractive'}
+                      </span>
+                      <button onClick={() => handleDownload('summary')} className="result-dl" title="Download">
                         <Download size={14} />
                       </button>
                     </div>
                   </div>
-                  <div className="result-body">
-                    {results.video_url ? (
-                      <div className="video-player-wrap">
-                        <video controls preload="metadata" crossOrigin="anonymous">
-                          <source src={`${API_BASE_URL}${results.video_url}`} />
-                          {results.subtitles_vtt_url && (
-                            <track
-                              kind="subtitles"
-                              label="English"
-                              srcLang="en"
-                              src={`${API_BASE_URL}${results.subtitles_vtt_url}`}
-                              default
-                            />
-                          )}
-                          Your browser does not support inline video playback.
-                        </video>
-                      </div>
-                    ) : (
-                      <div className="video-player-fallback">Video preview not available.</div>
-                    )}
-
-                    <button
-                      type="button"
-                      onClick={() => setShowRawSrt((v) => !v)}
-                      className="video-toggle-srt"
-                    >
-                      {showRawSrt ? '▾ Hide raw subtitles' : '▸ Show raw subtitles'}
-                    </button>
-                    {showRawSrt && (
-                      <div className="srt-raw">
-                        <pre>{results.subtitles}</pre>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {(selectedOptions.summary || selectedOptions.topicBased) && results.summary && (
-                <div className="result-card">
-                  <div className="result-header">
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                      <div className="result-title">
-                        <Brain size={15} color="rgba(100,210,200,0.8)" />
-                        {selectedOptions.topicBased ? 'Topic analysis' : 'AI summary'}
-                      </div>
-                      {results.summary.topic && (
-                        <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)', paddingLeft: 23 }}>
-                          Topic: {results.summary.topic}
-                        </span>
-                      )}
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span className={`badge ${results.summary.summary_type === 'gemini' ? 'badge-teal' : 'badge-dim'}`}>
-                        {results.summary.summary_type === 'gemini'
-                          ? 'Gemini'
-                          : results.summary.summary_type === 'topic_based'
-                            ? 'Topic'
-                            : 'Extractive'}
-                      </span>
-                      <button onClick={() => handleDownload('summary')} className="result-dl"><Download size={14} /></button>
-                    </div>
-                  </div>
-                  <div className="result-body">
+                  <div className="rs-body">
                     <p>{results.summary.text}</p>
-                    {results.summary.key_points?.length > 0 && results.summary.key_points.map((point, i) => (
-                      <div key={i} className="key-point">
-                        <div className="key-bullet" />
-                        <span>{point}</span>
+                    {results.summary.key_points?.length > 0 && (
+                      <div className="key-points-list">
+                        <span className="key-points-eyebrow">Key points</span>
+                        {results.summary.key_points.map((point, i) => (
+                          <div key={i} className="key-point">
+                            <div className="key-bullet" />
+                            <span>{point}</span>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    )}
                   </div>
-                </div>
+                </section>
               )}
 
-              {selectedOptions.keyframes && (
-                <div className="result-card" style={{ gridColumn: '1 / -1' }}>
-                  <div className="result-header">
-                    <div className="result-title">
-                      <Image size={15} color="rgba(100,210,200,0.8)" />
-                      Keyframes
-                      {results.keyframes.length > 0 && (
-                        <span className="badge badge-dim" style={{ marginLeft: 8 }}>{results.keyframes.length}</span>
-                      )}
+              {/* Topic analysis (independent from AI summary) */}
+              {selectedOptions.topicBased && results.topic_analysis && (
+                <section className="result-section topic-section">
+                  <div className="rs-head">
+                    <div className="rs-head-left">
+                      <div className="rs-head-icon">
+                        <Languages size={16} color="rgba(232, 200, 110, 0.95)" />
+                      </div>
+                      <div className="rs-head-text">
+                        <h3 className="rs-title">Topic analysis</h3>
+                        <span className="rs-subtitle">
+                          {results.topic_analysis.topic
+                            ? <>Focus: <em style={{ color: 'rgba(232,200,110,0.85)', fontStyle: 'normal' }}>{results.topic_analysis.topic}</em></>
+                            : 'No topic specified'}
+                          {typeof results.topic_analysis.relevant_segments_found === 'number' &&
+                            ` · ${results.topic_analysis.relevant_segments_found} relevant segments`}
+                        </span>
+                      </div>
                     </div>
-                    <button onClick={() => handleDownload('keyframes')} className="result-dl" title="Download timestamp list">
-                      <Download size={14} />
-                    </button>
+                    <div className="rs-tools">
+                      <span className="badge badge-dim">Topic</span>
+                      <button onClick={() => handleDownload('topic')} className="result-dl" title="Download">
+                        <Download size={14} />
+                      </button>
+                    </div>
                   </div>
-                  <div className="result-body">
+                  <div className="rs-body">
+                    <p>{results.topic_analysis.summary}</p>
+                    {results.topic_analysis.key_points?.length > 0 && (
+                      <div className="key-points-list">
+                        <span className="key-points-eyebrow">Key mentions</span>
+                        {results.topic_analysis.key_points.map((point, i) => (
+                          <div key={i} className="key-point">
+                            <div className="key-bullet" />
+                            <span>{point}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </section>
+              )}
+
+              {/* Keyframes — clickable thumbnails that seek the video */}
+              {selectedOptions.keyframes && (
+                <section className="result-section">
+                  <div className="rs-head">
+                    <div className="rs-head-left">
+                      <div className="rs-head-icon">
+                        <Image size={16} color="rgba(100,210,200,0.9)" />
+                      </div>
+                      <div className="rs-head-text">
+                        <h3 className="rs-title">Keyframes</h3>
+                        <span className="rs-subtitle">
+                          {results.keyframes.length > 0
+                            ? `${results.keyframes.length} moments — click to jump to that timestamp`
+                            : 'No keyframes extracted'}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="rs-tools">
+                      <button onClick={() => handleDownload('keyframes')} className="result-dl" title="Download timestamps">
+                        <Download size={14} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="rs-body">
                     {results.keyframes.length === 0 ? (
                       <div className="kf-empty">No keyframes extracted.</div>
                     ) : (
-                      <div className="kf-grid">
+                      <div className="kf-strip">
                         {results.keyframes.map((kf, i) => {
                           const url = kf.frame_url ? `${API_BASE_URL}${kf.frame_url}` : null;
                           const ts = typeof kf.timestamp === 'number'
                             ? `${Math.floor(kf.timestamp / 60)}:${String(Math.floor(kf.timestamp % 60)).padStart(2, '0')}`
                             : (kf.timestamp || `${i + 1}`);
-                          return url ? (
-                            <a key={i} href={url} target="_blank" rel="noreferrer" className="kf-cell">
-                              <img src={url} alt={`Keyframe at ${ts}`} loading="lazy" />
-                              <span className="kf-time">{ts}</span>
-                            </a>
-                          ) : (
-                            <div key={i} className="kf-cell" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              <span className="kf-time" style={{ position: 'static' }}>{ts}</span>
-                            </div>
+                          return (
+                            <button
+                              key={i}
+                              type="button"
+                              onClick={() => seekToTimestamp(kf.timestamp)}
+                              className="kf-cell-btn"
+                              title={`Jump to ${ts}`}
+                            >
+                              {url && <img src={url} alt={`Keyframe at ${ts}`} loading="lazy" />}
+                              <div className="kf-cell-overlay">
+                                <span className="kf-cell-time">{ts}</span>
+                                <span className="kf-cell-jump"><Play size={9} /> Jump</span>
+                              </div>
+                            </button>
                           );
                         })}
                       </div>
                     )}
                   </div>
-                </div>
+                </section>
               )}
 
-              {selectedOptions.rag && results.rag && (
-                <div className="result-card">
-                  <div className="result-header">
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                      <div className="result-title">
-                        <Brain size={15} color="rgba(100,210,200,0.8)" />
-                        RAG summary
+              {/* Transcript */}
+              {selectedOptions.transcript && (
+                <section className="result-section">
+                  <div className="rs-head">
+                    <div className="rs-head-left">
+                      <div className="rs-head-icon">
+                        <FileText size={16} color="rgba(100,210,200,0.9)" />
                       </div>
-                      {results.rag.summary?.video_title && (
-                        <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)', paddingLeft: 23 }}>
-                          {results.rag.summary.video_title}
-                        </span>
-                      )}
+                      <div className="rs-head-text">
+                        <h3 className="rs-title">Transcript</h3>
+                        <span className="rs-subtitle">Full text from the video audio</span>
+                      </div>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      {results.rag.summary?.method && (
-                        <span className={`badge ${results.rag.summary.method === 'gemini' ? 'badge-teal' : 'badge-dim'}`}>
-                          {results.rag.summary.method === 'gemini' ? 'Gemini' : 'Extractive'}
-                        </span>
-                      )}
-                      <Link to="/search" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.76rem', color: 'var(--teal)', textDecoration: 'none' }}>
-                        <Search size={12} /> Search
-                      </Link>
-                      <button onClick={() => handleDownload('rag')} className="result-dl"><Download size={14} /></button>
+                    <div className="rs-tools">
+                      <button onClick={() => handleDownload('transcript')} className="result-dl" title="Download">
+                        <Download size={14} />
+                      </button>
                     </div>
                   </div>
-                  <div className="result-body">
-                    <p>{results.rag.summary?.summary || 'No RAG summary available'}</p>
+                  <div className="rs-body">
+                    <pre>{results.transcript}</pre>
                   </div>
+                </section>
+              )}
+
+              {/* Raw subtitles — collapsed by default */}
+              {selectedOptions.subtitles && results.subtitles && (
+                <div className="collapsible-section">
+                  <button
+                    type="button"
+                    onClick={() => setShowRawSrt(v => !v)}
+                    className="collapsible-toggle"
+                  >
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <Clock size={14} color="rgba(100,210,200,0.7)" />
+                      Raw subtitles ({subtitleFormat.toUpperCase()})
+                    </span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                      <span
+                        onClick={(e) => { e.stopPropagation(); handleDownload('subtitles'); }}
+                        style={{ color: 'var(--teal-dim)', display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: '0.78rem' }}
+                      >
+                        <Download size={13} /> Download
+                      </span>
+                      <span style={{ color: 'var(--text-dim)', fontSize: '0.95rem' }}>
+                        {showRawSrt ? '▾' : '▸'}
+                      </span>
+                    </span>
+                  </button>
+                  {showRawSrt && (
+                    <div className="collapsible-content">
+                      <pre>{results.subtitles}</pre>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
