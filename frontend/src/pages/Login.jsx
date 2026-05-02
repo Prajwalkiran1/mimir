@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Eye, EyeOff, Lock, User } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -256,7 +256,9 @@ const Login = () => {
   const [isLoading, setIsLoading]       = useState(false);
   const [errors, setErrors]             = useState({});
   const navigate = useNavigate();
+  const location = useLocation();
   const { login } = useAuth();
+  const redirectTo = location.state?.from || '/landing';
 
   const validateForm = () => {
     const newErrors = {};
@@ -287,8 +289,8 @@ const Login = () => {
       console.log('Login function result:', result);
 
       if (result.success) {
-        console.log('Login successful, navigating to landing page');
-        navigate('/landing');
+        console.log('Login successful, navigating to', redirectTo);
+        navigate(redirectTo, { replace: true });
       } else {
         console.log('Login failed:', result.error);
         setErrors({ general: result.error || 'Login failed. Please try again.' });

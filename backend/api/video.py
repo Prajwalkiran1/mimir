@@ -2,6 +2,7 @@
 
 import os
 import uuid
+import asyncio
 import logging
 from fastapi import APIRouter, File, UploadFile, HTTPException, BackgroundTasks, Form
 from fastapi.responses import JSONResponse
@@ -24,7 +25,8 @@ class ProcessingOptions(BaseModel):
     rag: bool = False
     topic_based: bool = False
     topic: Optional[str] = None
-    download_format: str = "srt"
+    download_format: str = "srt"        # 'srt' | 'vtt' (user choice for download)
+    summary_length: str = "medium"      # 'short' | 'medium' | 'long'
     use_gpu: bool = True
     video_id: Optional[str] = None
     
@@ -149,9 +151,61 @@ async def list_tasks():
     tasks = task_manager.get_all_tasks()
     return {"tasks": [task.to_dict() for task in tasks]}
 
+def _to_url_path(path: str) -> str:
+    """Normalise a backend file path to a forward-slash URL path under /uploads."""
+    p = path.replace("\\", "/")
+    # Strip any leading "./"
+    if p.startswith("./"):
+        p = p[2:]
+    # Ensure it starts with /uploads/
+    if not p.startswith("/"):
+        p = "/" + p
+    return p
+
+
+def _enrich_results_with_urls(results: Dict[str, Any], task_id: str, video_path: str, loop: asyncio.AbstractEventLoop) -> None:
+    """Add browser-loadable URLs to the results dict for the frontend."""
+    filename = os.path.basename(video_path)
+    upload_dir = os.path.dirname(video_path)
+
+    # Original video for the inline player
+    results["video_url"] = f"/uploads/{task_id}/{filename}"
+    results["task_id"] = task_id
+    results["filename"] = filename
+
+    # Always emit a sibling .vtt next to the video so the <track> tag can load it,
+    # regardless of the user's chosen download format.
+    if results.get("subtitles") and isinstance(results["subtitles"], dict):
+        try:
+            from pipeline.subtitle_generation import SubtitleGenerator
+            transcript = results.get("transcript")
+            if transcript and isinstance(transcript, dict) and transcript.get("segments"):
+                vtt_payload = loop.run_until_complete(
+                    SubtitleGenerator().generate_subtitles(transcript, "vtt")
+                )
+                vtt_path = os.path.join(upload_dir, "subtitles.vtt")
+                with open(vtt_path, "w", encoding="utf-8") as f:
+                    f.write(vtt_payload.get("subtitles", ""))
+                results["subtitles_vtt_url"] = f"/uploads/{task_id}/subtitles.vtt"
+        except Exception as e:
+            logger.warning(f"Failed to write subtitles.vtt for task {task_id}: {e}")
+
+    # Keyframe image URLs — keyframe_extraction stores frame_path as
+    # uploads/{video_stem}/frames/keyframe_{ts}.jpg (relative, OS-native sep).
+    kf_block = results.get("keyframes")
+    if isinstance(kf_block, dict) and isinstance(kf_block.get("keyframes"), list):
+        for kf in kf_block["keyframes"]:
+            fp = kf.get("frame_path")
+            if not fp:
+                continue
+            url_path = fp.replace("\\", "/")
+            if not url_path.startswith("/"):
+                url_path = "/" + url_path
+            kf["frame_url"] = url_path
+
+
 def process_video_task(task_id: str, video_path: str, options: ProcessingOptions):
     """Background task for video processing - runs in thread pool so event loop stays free for polls"""
-    import asyncio
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
@@ -166,6 +220,12 @@ def process_video_task(task_id: str, video_path: str, options: ProcessingOptions
                 )
             )
         )
+
+        # Enrich with URLs the frontend can load directly via /uploads static mount.
+        try:
+            _enrich_results_with_urls(results, task_id, video_path, loop)
+        except Exception as e:
+            logger.warning(f"URL enrichment failed for task {task_id}: {e}")
 
         task_manager.update_status(task_id, "completed", "Processing completed!", 100)
         task_manager.set_results(task_id, results)

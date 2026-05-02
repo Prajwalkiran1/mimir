@@ -785,15 +785,9 @@ const LandingPage = () => {
               </p>
 
               <div className="hero-btns">
-                {isAuthenticated ? (
-                  <Link to="/dashboard" className="btn-teal">
-                    Go to Dashboard <ChevronRight size={16} />
-                  </Link>
-                ) : (
-                  <Link to="/upload" className="btn-teal">
-                    Upload a video <Upload size={15} />
-                  </Link>
-                )}
+                <Link to="/upload" className="btn-teal">
+                  Upload a video <Upload size={15} />
+                </Link>
                 <a href="#how-it-works" className="btn-outline">
                   How it works <ArrowDown size={15} />
                 </a>
@@ -936,7 +930,7 @@ const LandingPage = () => {
             <div>
               <div className="footer-col-label">Platform</div>
               <Link to="/upload" className="footer-link">Upload</Link>
-              <Link to="/dashboard" className="footer-link">Dashboard</Link>
+              <Link to="/search" className="footer-link">Search</Link>
               <Link to="/profile" className="footer-link">Profile</Link>
             </div>
           </div>

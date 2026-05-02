@@ -3,9 +3,10 @@ import { Link } from 'react-router-dom';
 import {
   User, Mail, Calendar, FileVideo, Download, Clock,
   Search, Eye, Trash2, Settings, LogOut, ChevronRight,
-  Brain, FileText, Image, BarChart3
+  Brain, FileText, Image, BarChart3, X, Play
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { apiService, API_BASE_URL } from '../services/api';
 
 /* ─── Styles ─────────────────────────────────────────────────────────────────── */
 const PageStyles = () => (
@@ -464,6 +465,116 @@ const PageStyles = () => (
     @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
     .tab-content { animation: fadeIn 0.3s ease; }
 
+    /* ── Result modal ── */
+    .modal-backdrop {
+      position: fixed; inset: 0; z-index: 999;
+      background: rgba(5, 12, 12, 0.78);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      display: flex; align-items: center; justify-content: center;
+      padding: 24px;
+      animation: fadeIn 0.2s ease;
+    }
+    .modal-card {
+      width: 100%; max-width: 880px; max-height: 90vh; overflow: hidden;
+      display: flex; flex-direction: column;
+      background: rgba(15, 35, 33, 0.96);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-xl);
+      box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6), inset 0 1.5px 0 var(--glass-shine);
+      animation: riseIn 0.35s cubic-bezier(0.23, 1, 0.32, 1) both;
+    }
+    .modal-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 20px 28px; border-bottom: 1px solid var(--glass-border);
+      flex-shrink: 0;
+    }
+    .modal-head-title {
+      font-family: var(--font-serif); font-size: 1.3rem; color: var(--white);
+      max-width: 540px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .modal-close {
+      width: 34px; height: 34px; border-radius: 10px; border: none;
+      background: rgba(100, 210, 200, 0.06);
+      border: 1px solid var(--glass-border);
+      color: var(--text-dim); cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.2s;
+    }
+    .modal-close:hover { background: rgba(220, 38, 38, 0.1); border-color: rgba(220, 38, 38, 0.3); color: #fca5a5; }
+
+    .modal-body {
+      padding: 24px 28px; overflow-y: auto; flex: 1;
+      display: flex; flex-direction: column; gap: 16px;
+    }
+    .modal-block {
+      background: rgba(5, 18, 18, 0.5);
+      border: 1px solid var(--glass-border);
+      border-radius: 14px; padding: 16px 18px;
+    }
+    .modal-block-title {
+      font-size: 0.62rem; font-weight: 500; letter-spacing: 0.2em;
+      text-transform: uppercase; color: var(--teal-dim); margin-bottom: 10px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .modal-block-body p {
+      font-size: 0.86rem; color: var(--text); line-height: 1.65;
+      white-space: pre-wrap; word-wrap: break-word;
+    }
+    .modal-block-body pre {
+      font-family: 'Menlo', 'Consolas', monospace; font-size: 0.78rem;
+      color: var(--text); line-height: 1.6;
+      white-space: pre-wrap; word-wrap: break-word;
+      max-height: 240px; overflow-y: auto;
+    }
+    .modal-keypoint {
+      display: flex; align-items: flex-start; gap: 10px; padding: 6px 0;
+      font-size: 0.84rem; color: var(--text); line-height: 1.55;
+    }
+    .modal-keybullet {
+      width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; margin-top: 9px;
+      background: var(--teal);
+    }
+    .modal-video {
+      width: 100%; aspect-ratio: 16 / 9; border-radius: 10px;
+      background: #000; display: block; outline: none;
+    }
+    .modal-kf-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 8px;
+    }
+    .modal-kf-cell {
+      position: relative; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden;
+      border: 1px solid var(--glass-border); background: #000;
+      cursor: pointer; transition: transform 0.2s;
+    }
+    .modal-kf-cell:hover { transform: scale(1.04); }
+    .modal-kf-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .modal-kf-time {
+      position: absolute; bottom: 4px; left: 4px;
+      background: rgba(6, 20, 20, 0.85);
+      color: var(--teal); font-family: 'Menlo', monospace;
+      font-size: 0.62rem; padding: 1px 6px; border-radius: 100px;
+      border: 1px solid var(--glass-border);
+    }
+
+    /* Confirm-delete inline */
+    .confirm-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 4px 10px; border-radius: 100px;
+      background: rgba(220, 38, 38, 0.1);
+      border: 1px solid rgba(220, 38, 38, 0.3);
+    }
+    .confirm-row span { font-size: 0.74rem; color: #fca5a5; }
+    .confirm-row .confirm-btn {
+      font-size: 0.74rem; font-weight: 500;
+      padding: 3px 10px; border-radius: 100px; cursor: pointer; border: none;
+      transition: all 0.2s;
+    }
+    .confirm-row .confirm-yes { background: rgba(220, 38, 38, 0.6); color: white; }
+    .confirm-row .confirm-yes:hover { background: rgba(220, 38, 38, 0.85); }
+    .confirm-row .confirm-no  { background: transparent; color: var(--text-dim); }
+
     ::-webkit-scrollbar { width: 5px; }
     ::-webkit-scrollbar-track { background: var(--bg); }
     ::-webkit-scrollbar-thumb { background: rgba(100,210,200,0.22); border-radius: 3px; }
@@ -501,17 +612,68 @@ const Profile = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all');
   const [tasks, setTasks] = useState([]);
+  const [viewingTask, setViewingTask] = useState(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const { user, logout } = useAuth();
 
-  useEffect(() => {
+  const refreshTasks = () => {
     const token = localStorage.getItem('token');
-    fetch('http://localhost:8000/api/v1/tasks', {
+    fetch(`${API_BASE_URL}/api/v1/tasks`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     })
       .then(r => r.json())
       .then(data => setTasks(data.tasks || []))
       .catch(() => {});
-  }, []);
+  };
+
+  useEffect(() => { refreshTasks(); }, []);
+
+  const handleView = async (taskId) => {
+    const task = tasks.find(t => t.task_id === taskId);
+    if (!task) return;
+    // task.results is already in the list response — no extra fetch needed
+    setViewingTask(task);
+  };
+
+  const handleDelete = async (taskId) => {
+    try {
+      await apiService.deleteTask(taskId);
+      setConfirmDeleteId(null);
+      setTasks(prev => prev.filter(t => t.task_id !== taskId));
+    } catch (e) {
+      console.error('Delete failed', e);
+    }
+  };
+
+  const handleDownloadFor = (task) => {
+    // Bundle the available textual outputs into a single .txt
+    const parts = [];
+    const r = task.results || {};
+    const filename = (task.video_path || task.task_id).split(/[/\\]/).pop();
+    parts.push(`# ${filename}`);
+    if (r.summary) {
+      const text = typeof r.summary === 'string' ? r.summary : (r.summary.summary || r.summary.text || '');
+      const kps = r.summary.key_points || [];
+      parts.push('\n\n## Summary\n' + text);
+      if (kps.length) parts.push('\nKey Points:\n' + kps.map(p => `• ${p}`).join('\n'));
+    }
+    if (r.transcript) {
+      const tr = r.transcript.segments
+        ? r.transcript.segments.map(s => s.text).join(' ')
+        : (typeof r.transcript === 'string' ? r.transcript : '');
+      if (tr) parts.push('\n\n## Transcript\n' + tr);
+    }
+    if (r.subtitles) {
+      const subs = typeof r.subtitles === 'string' ? r.subtitles : (r.subtitles.subtitles || '');
+      if (subs) parts.push('\n\n## Subtitles\n' + subs);
+    }
+    const blob = new Blob([parts.join('\n')], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `mimir_${filename.replace(/\.[^/.]+$/, '')}.txt`;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+  };
 
   const userData = {
     name: user?.username || 'User',
@@ -721,9 +883,44 @@ const Profile = () => {
                               {badge.label}
                             </span>
                             <span className={`status-chip ${statusCls}`}>{gen.status}</span>
-                            <button className="icon-btn view" title="View"><Eye size={13} /></button>
-                            <button className="icon-btn dl" title="Download"><Download size={13} /></button>
-                            <button className="icon-btn del" title="Delete"><Trash2 size={13} /></button>
+                            {confirmDeleteId === gen.id ? (
+                              <div className="confirm-row">
+                                <span>Delete?</span>
+                                <button onClick={() => handleDelete(gen.id)} className="confirm-btn confirm-yes">Yes</button>
+                                <button onClick={() => setConfirmDeleteId(null)} className="confirm-btn confirm-no">No</button>
+                              </div>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => handleView(gen.id)}
+                                  className="icon-btn view"
+                                  title="View results"
+                                  disabled={gen.status !== 'completed'}
+                                  style={gen.status !== 'completed' ? { opacity: 0.4, cursor: 'not-allowed' } : {}}
+                                >
+                                  <Eye size={13} />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    const t = tasks.find(x => x.task_id === gen.id);
+                                    if (t) handleDownloadFor(t);
+                                  }}
+                                  className="icon-btn dl"
+                                  title="Download bundle"
+                                  disabled={gen.status !== 'completed'}
+                                  style={gen.status !== 'completed' ? { opacity: 0.4, cursor: 'not-allowed' } : {}}
+                                >
+                                  <Download size={13} />
+                                </button>
+                                <button
+                                  onClick={() => setConfirmDeleteId(gen.id)}
+                                  className="icon-btn del"
+                                  title="Delete"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </>
+                            )}
                           </div>
                         </div>
                       );
@@ -786,6 +983,116 @@ const Profile = () => {
           </div>
         </div>
       </div>
+
+      {/* ── Result modal ── */}
+      {viewingTask && (() => {
+        const r = viewingTask.results || {};
+        const filename = (viewingTask.video_path || viewingTask.task_id).split(/[/\\]/).pop();
+        const transcriptText = r.transcript?.segments
+          ? r.transcript.segments.map(s => s.text).join(' ')
+          : (typeof r.transcript === 'string' ? r.transcript : '');
+        const summary = r.summary || {};
+        const summaryText = typeof summary === 'string' ? summary : (summary.summary || summary.text || '');
+        const keyPoints = (summary.key_points) || [];
+        const subtitlesText = typeof r.subtitles === 'string' ? r.subtitles : (r.subtitles?.subtitles || '');
+        const keyframes = r.keyframes?.keyframes || [];
+
+        return (
+          <div className="modal-backdrop" onClick={() => setViewingTask(null)}>
+            <div className="modal-card" onClick={e => e.stopPropagation()}>
+              <div className="modal-head">
+                <div className="modal-head-title" title={filename}>{filename}</div>
+                <button onClick={() => setViewingTask(null)} className="modal-close" title="Close">
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="modal-body">
+
+                {r.video_url && (
+                  <div className="modal-block">
+                    <p className="modal-block-title"><Play size={11} /> Preview</p>
+                    <video controls preload="metadata" crossOrigin="anonymous" className="modal-video">
+                      <source src={`${API_BASE_URL}${r.video_url}`} />
+                      {r.subtitles_vtt_url && (
+                        <track kind="subtitles" srcLang="en" label="English" default
+                          src={`${API_BASE_URL}${r.subtitles_vtt_url}`} />
+                      )}
+                    </video>
+                  </div>
+                )}
+
+                {summaryText && (
+                  <div className="modal-block">
+                    <p className="modal-block-title"><Brain size={11} /> Summary</p>
+                    <div className="modal-block-body">
+                      <p>{summaryText}</p>
+                      {keyPoints.length > 0 && (
+                        <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(100,210,200,0.1)' }}>
+                          {keyPoints.map((p, i) => (
+                            <div key={i} className="modal-keypoint">
+                              <div className="modal-keybullet" />
+                              <span>{p}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {keyframes.length > 0 && (
+                  <div className="modal-block">
+                    <p className="modal-block-title"><Image size={11} /> Keyframes ({keyframes.length})</p>
+                    <div className="modal-kf-grid">
+                      {keyframes.map((kf, i) => {
+                        const url = kf.frame_url ? `${API_BASE_URL}${kf.frame_url}` : null;
+                        const ts = typeof kf.timestamp === 'number'
+                          ? `${Math.floor(kf.timestamp / 60)}:${String(Math.floor(kf.timestamp % 60)).padStart(2, '0')}`
+                          : (kf.timestamp || `${i + 1}`);
+                        return url ? (
+                          <a key={i} href={url} target="_blank" rel="noreferrer" className="modal-kf-cell">
+                            <img src={url} alt={`Keyframe ${ts}`} loading="lazy" />
+                            <span className="modal-kf-time">{ts}</span>
+                          </a>
+                        ) : (
+                          <div key={i} className="modal-kf-cell">
+                            <span className="modal-kf-time">{ts}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {transcriptText && (
+                  <div className="modal-block">
+                    <p className="modal-block-title"><FileText size={11} /> Transcript</p>
+                    <div className="modal-block-body">
+                      <pre>{transcriptText}</pre>
+                    </div>
+                  </div>
+                )}
+
+                {subtitlesText && (
+                  <div className="modal-block">
+                    <p className="modal-block-title"><Clock size={11} /> Subtitles</p>
+                    <div className="modal-block-body">
+                      <pre>{subtitlesText}</pre>
+                    </div>
+                  </div>
+                )}
+
+                {!summaryText && !transcriptText && !subtitlesText && keyframes.length === 0 && (
+                  <div style={{ textAlign: 'center', padding: 32, color: 'var(--text-dim)' }}>
+                    No result data available for this task.
+                  </div>
+                )}
+
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

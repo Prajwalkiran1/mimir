@@ -5,7 +5,7 @@ import {
   CheckCircle, AlertCircle, RotateCcw, X, ChevronRight,
   Brain, Languages, Image, Search, Play, Zap
 } from 'lucide-react';
-import { apiService } from '../services/api';
+import { apiService, API_BASE_URL } from '../services/api';
 
 /* ─── Styles ─────────────────────────────────────────────────────────────────── */
 const PageStyles = () => (
@@ -343,6 +343,131 @@ const PageStyles = () => (
 
     .option-desc { font-size: 0.76rem; color: var(--text-dim); line-height: 1.5; padding-left: 40px; }
 
+    /* ── Customize panel ── */
+    .customize-section {
+      background: var(--glass-bg);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-lg);
+      padding: 18px 22px;
+      margin-bottom: 16px;
+      animation: riseIn 0.45s cubic-bezier(0.23,1,0.32,1) both;
+    }
+    .customize-eyebrow {
+      font-size: 0.6rem; font-weight: 500; letter-spacing: 0.22em;
+      text-transform: uppercase; color: var(--teal-dim);
+      margin-bottom: 14px; display: inline-flex; align-items: center; gap: 8px;
+    }
+    .customize-eyebrow::before {
+      content: ''; width: 5px; height: 5px; border-radius: 50%;
+      background: var(--teal-dim);
+    }
+    .customize-row {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 14px; padding: 10px 0;
+      border-bottom: 1px solid rgba(100,210,200,0.06);
+    }
+    .customize-row:last-child { border-bottom: none; padding-bottom: 0; }
+    .customize-row:first-of-type { padding-top: 0; }
+    .customize-label {
+      font-size: 0.83rem; color: var(--text); font-weight: 400;
+      display: flex; flex-direction: column; gap: 3px;
+    }
+    .customize-label-hint {
+      font-size: 0.72rem; color: var(--text-dim); font-weight: 300;
+    }
+
+    /* Segmented control */
+    .seg-toggle {
+      display: inline-flex; padding: 3px;
+      background: rgba(5, 18, 18, 0.55);
+      border: 1px solid var(--glass-border);
+      border-radius: 100px; gap: 2px;
+    }
+    .seg-btn {
+      font-family: var(--font-sans); font-size: 0.78rem; font-weight: 500;
+      padding: 6px 16px; border-radius: 100px; border: none;
+      background: transparent; color: var(--text-dim);
+      cursor: pointer; transition: all 0.22s ease;
+      letter-spacing: 0.02em;
+    }
+    .seg-btn:hover { color: var(--text); }
+    .seg-btn.active {
+      background: linear-gradient(135deg, rgba(100,210,200,0.85) 0%, rgba(80,190,175,0.85) 100%);
+      color: #061414; box-shadow: 0 2px 10px rgba(100,210,200,0.18);
+    }
+
+    /* ── Video player (subtitles result) ── */
+    .video-player-wrap {
+      position: relative; width: 100%; border-radius: 12px; overflow: hidden;
+      background: rgba(0, 0, 0, 0.6);
+      border: 1px solid var(--glass-border);
+      aspect-ratio: 16 / 9;
+    }
+    .video-player-wrap video {
+      width: 100%; height: 100%; display: block; outline: none;
+      background: #000;
+    }
+    .video-player-fallback {
+      padding: 20px; color: var(--text-dim); font-size: 0.84rem;
+      text-align: center; font-weight: 300;
+    }
+    .video-toggle-srt {
+      margin-top: 12px;
+      font-size: 0.74rem; color: var(--teal-dim); cursor: pointer;
+      background: none; border: none; font-family: var(--font-sans);
+      padding: 4px 0; transition: color 0.2s; display: inline-flex; gap: 4px; align-items: center;
+    }
+    .video-toggle-srt:hover { color: var(--teal); }
+    .srt-raw {
+      margin-top: 10px; max-height: 220px; overflow-y: auto;
+      background: rgba(5, 18, 18, 0.55);
+      border: 1px solid var(--glass-border);
+      border-radius: 10px; padding: 14px;
+    }
+    .srt-raw pre {
+      font-family: 'Menlo', 'Consolas', monospace; font-size: 0.78rem;
+      color: var(--text); white-space: pre-wrap; word-wrap: break-word; line-height: 1.6;
+    }
+
+    /* ── Keyframe grid ── */
+    .kf-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 10px;
+    }
+    .kf-cell {
+      position: relative; border-radius: 10px; overflow: hidden;
+      border: 1px solid var(--glass-border);
+      background: rgba(0, 0, 0, 0.5);
+      aspect-ratio: 16 / 9;
+      cursor: pointer; text-decoration: none;
+      transition: all 0.25s cubic-bezier(0.23, 1, 0.32, 1);
+    }
+    .kf-cell:hover {
+      transform: scale(1.04);
+      border-color: rgba(100,210,200,0.45);
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+    }
+    .kf-cell img {
+      width: 100%; height: 100%; object-fit: cover; display: block;
+      transition: transform 0.4s ease;
+    }
+    .kf-cell:hover img { transform: scale(1.06); }
+    .kf-time {
+      position: absolute; bottom: 6px; left: 6px;
+      background: rgba(6, 20, 20, 0.85);
+      backdrop-filter: blur(8px);
+      border: 1px solid var(--glass-border);
+      color: var(--teal); font-family: 'Menlo', 'Consolas', monospace;
+      font-size: 0.68rem; font-weight: 500;
+      padding: 2px 7px; border-radius: 100px;
+    }
+    .kf-empty {
+      padding: 32px 16px; text-align: center;
+      color: var(--text-dim); font-style: italic; font-size: 0.86rem; font-weight: 300;
+    }
+
     /* ── Topic field ── */
     .topic-wrap {
       background: var(--glass-bg);
@@ -639,12 +764,14 @@ const VideoUpload = () => {
     keyframes: false, rag: false, topicBased: false,
   });
   const [selectedTopic, setSelectedTopic]   = useState('');
-  const [downloadFormat]                    = useState('srt');
+  const [summaryLength, setSummaryLength]   = useState('medium'); // short | medium | long
+  const [subtitleFormat, setSubtitleFormat] = useState('srt');    // srt | vtt
   const [error, setError]                   = useState(null);
 
   const [phaseMessageIdx, setPhaseMessageIdx]     = useState(0);
   const [currentPhaseId, setCurrentPhaseId]       = useState('init');
   const [completedPhaseIds, setCompletedPhaseIds] = useState([]);
+  const [showRawSrt, setShowRawSrt]               = useState(false);
 
   useEffect(() => {
     if (!isProcessing) { setPhaseMessageIdx(0); setCurrentPhaseId('init'); setCompletedPhaseIds([]); return; }
@@ -691,7 +818,7 @@ const VideoUpload = () => {
         subtitles: selectedOptions.subtitles, keyframes: selectedOptions.keyframes,
         rag: selectedOptions.rag, topic_based: selectedOptions.topicBased,
         topic: selectedOptions.topicBased ? selectedTopic : null,
-        download_format: downloadFormat, use_gpu: true,
+        download_format: subtitleFormat, summary_length: summaryLength, use_gpu: true,
       };
       const response = await apiService.uploadVideo(videoFile, options);
       apiService.pollStatus(response.task_id, (status) => {
@@ -707,12 +834,16 @@ const VideoUpload = () => {
               key_points: rawSummary?.key_points || [],
               summary_type: rawSummary?.summary_type || 'extractive',
               topic: rawSummary?.topic, method: rawSummary?.method,
+              summary_length: rawSummary?.summary_length,
             },
             subtitles: status.results?.subtitles?.subtitles || status.results?.subtitles || 'No subtitles available',
             keyframes: status.results?.keyframes?.keyframes
               ? status.results.keyframes.keyframes.map(kf => ({ ...kf, path: kf.frame_path || kf.path || 'unknown' }))
               : [],
             rag: status.results?.rag || null,
+            video_url: status.results?.video_url || null,
+            subtitles_vtt_url: status.results?.subtitles_vtt_url || null,
+            task_id: status.results?.task_id || response.task_id,
           });
           setIsProcessing(false);
         } else if (status.status === 'failed' || status.status === 'error') {
@@ -730,7 +861,7 @@ const VideoUpload = () => {
     let content = '', filename = '';
     switch (type) {
       case 'transcript': content = typeof results.transcript === 'string' ? results.transcript : ''; filename = `transcript_${videoFile.name.replace(/\.[^/.]+$/, '')}.txt`; break;
-      case 'subtitles': content = typeof results.subtitles === 'string' ? results.subtitles : ''; filename = `subtitles_${videoFile.name.replace(/\.[^/.]+$/, '')}.srt`; break;
+      case 'subtitles': content = typeof results.subtitles === 'string' ? results.subtitles : ''; filename = `subtitles_${videoFile.name.replace(/\.[^/.]+$/, '')}.${subtitleFormat}`; break;
       case 'summary':
         content = results.summary?.text || '';
         if (results.summary?.key_points?.length) content += '\n\nKey Points:\n' + results.summary.key_points.map(p => `• ${p}`).join('\n');
@@ -748,6 +879,7 @@ const VideoUpload = () => {
 
   const resetUpload = () => {
     setVideoFile(null); setResults(null); setIsProcessing(false); setError(null);
+    setSelectedTopic(''); setSummaryLength('medium'); setSubtitleFormat('srt');
     setSelectedOptions({ subtitles: true, transcript: true, summary: true, keyframes: false, rag: false, topicBased: false });
   };
 
@@ -856,6 +988,61 @@ const VideoUpload = () => {
                     ))}
                   </div>
                 </div>
+
+                {/* Customize: only shows controls relevant to enabled options */}
+                {(selectedOptions.summary || selectedOptions.topicBased || selectedOptions.subtitles) && (
+                  <div className="customize-section">
+                    <p className="customize-eyebrow">Customize</p>
+
+                    {(selectedOptions.summary || selectedOptions.topicBased) && (
+                      <div className="customize-row">
+                        <div className="customize-label">
+                          Summary length
+                          <span className="customize-label-hint">
+                            {summaryLength === 'short' && 'Brief — 1–2 paragraphs, 3 key points'}
+                            {summaryLength === 'medium' && 'Balanced — 3–5 paragraphs, 5 key points'}
+                            {summaryLength === 'long' && 'Detailed — 6–8 paragraphs, 8 key points'}
+                          </span>
+                        </div>
+                        <div className="seg-toggle">
+                          {['short', 'medium', 'long'].map((l) => (
+                            <button
+                              key={l}
+                              type="button"
+                              onClick={() => setSummaryLength(l)}
+                              className={`seg-btn${summaryLength === l ? ' active' : ''}`}
+                            >
+                              {l[0].toUpperCase() + l.slice(1)}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedOptions.subtitles && (
+                      <div className="customize-row">
+                        <div className="customize-label">
+                          Subtitle format
+                          <span className="customize-label-hint">
+                            {subtitleFormat === 'srt' ? 'SRT — universal video player support' : 'WebVTT — modern web standard'}
+                          </span>
+                        </div>
+                        <div className="seg-toggle">
+                          {['srt', 'vtt'].map((f) => (
+                            <button
+                              key={f}
+                              type="button"
+                              onClick={() => setSubtitleFormat(f)}
+                              className={`seg-btn${subtitleFormat === f ? ' active' : ''}`}
+                            >
+                              {f.toUpperCase()}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {selectedOptions.topicBased && (
                   <div className="topic-wrap">
@@ -975,15 +1162,53 @@ const VideoUpload = () => {
               )}
 
               {selectedOptions.subtitles && (
-                <div className="result-card">
+                <div className="result-card" style={{ gridColumn: '1 / -1' }}>
                   <div className="result-header">
                     <div className="result-title">
-                      <Clock size={15} color="rgba(100,210,200,0.8)" />
-                      Subtitles (SRT)
+                      <Play size={15} color="rgba(100,210,200,0.8)" />
+                      Video preview with subtitles
                     </div>
-                    <button onClick={() => handleDownload('subtitles')} className="result-dl"><Download size={14} /></button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span className="badge badge-dim">{subtitleFormat.toUpperCase()}</span>
+                      <button onClick={() => handleDownload('subtitles')} className="result-dl" title="Download subtitles">
+                        <Download size={14} />
+                      </button>
+                    </div>
                   </div>
-                  <div className="result-body"><pre>{results.subtitles}</pre></div>
+                  <div className="result-body">
+                    {results.video_url ? (
+                      <div className="video-player-wrap">
+                        <video controls preload="metadata" crossOrigin="anonymous">
+                          <source src={`${API_BASE_URL}${results.video_url}`} />
+                          {results.subtitles_vtt_url && (
+                            <track
+                              kind="subtitles"
+                              label="English"
+                              srcLang="en"
+                              src={`${API_BASE_URL}${results.subtitles_vtt_url}`}
+                              default
+                            />
+                          )}
+                          Your browser does not support inline video playback.
+                        </video>
+                      </div>
+                    ) : (
+                      <div className="video-player-fallback">Video preview not available.</div>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => setShowRawSrt((v) => !v)}
+                      className="video-toggle-srt"
+                    >
+                      {showRawSrt ? '▾ Hide raw subtitles' : '▸ Show raw subtitles'}
+                    </button>
+                    {showRawSrt && (
+                      <div className="srt-raw">
+                        <pre>{results.subtitles}</pre>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -1003,7 +1228,11 @@ const VideoUpload = () => {
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span className={`badge ${results.summary.summary_type === 'gemini' ? 'badge-teal' : 'badge-dim'}`}>
-                        {results.summary.summary_type === 'gemini' ? 'Gemini' : 'Extractive'}
+                        {results.summary.summary_type === 'gemini'
+                          ? 'Gemini'
+                          : results.summary.summary_type === 'topic_based'
+                            ? 'Topic'
+                            : 'Extractive'}
                       </span>
                       <button onClick={() => handleDownload('summary')} className="result-dl"><Download size={14} /></button>
                     </div>
@@ -1021,23 +1250,42 @@ const VideoUpload = () => {
               )}
 
               {selectedOptions.keyframes && (
-                <div className="result-card">
+                <div className="result-card" style={{ gridColumn: '1 / -1' }}>
                   <div className="result-header">
                     <div className="result-title">
                       <Image size={15} color="rgba(100,210,200,0.8)" />
                       Keyframes
+                      {results.keyframes.length > 0 && (
+                        <span className="badge badge-dim" style={{ marginLeft: 8 }}>{results.keyframes.length}</span>
+                      )}
                     </div>
-                    <button onClick={() => handleDownload('keyframes')} className="result-dl"><Download size={14} /></button>
+                    <button onClick={() => handleDownload('keyframes')} className="result-dl" title="Download timestamp list">
+                      <Download size={14} />
+                    </button>
                   </div>
                   <div className="result-body">
-                    {results.keyframes.length === 0
-                      ? <p>No keyframes extracted.</p>
-                      : results.keyframes.map((kf, i) => (
-                          <div key={i} className="keyframe-row">
-                            <span className="keyframe-ts">{kf.timestamp}</span>
-                            <span style={{ fontSize: '0.8rem', color: 'var(--text)', lineHeight: 1.5 }}>{kf.description}</span>
-                          </div>
-                        ))}
+                    {results.keyframes.length === 0 ? (
+                      <div className="kf-empty">No keyframes extracted.</div>
+                    ) : (
+                      <div className="kf-grid">
+                        {results.keyframes.map((kf, i) => {
+                          const url = kf.frame_url ? `${API_BASE_URL}${kf.frame_url}` : null;
+                          const ts = typeof kf.timestamp === 'number'
+                            ? `${Math.floor(kf.timestamp / 60)}:${String(Math.floor(kf.timestamp % 60)).padStart(2, '0')}`
+                            : (kf.timestamp || `${i + 1}`);
+                          return url ? (
+                            <a key={i} href={url} target="_blank" rel="noreferrer" className="kf-cell">
+                              <img src={url} alt={`Keyframe at ${ts}`} loading="lazy" />
+                              <span className="kf-time">{ts}</span>
+                            </a>
+                          ) : (
+                            <div key={i} className="kf-cell" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <span className="kf-time" style={{ position: 'static' }}>{ts}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

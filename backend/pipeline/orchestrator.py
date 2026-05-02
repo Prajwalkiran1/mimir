@@ -130,7 +130,8 @@ class PipelineOrchestrator:
             elif options.get('summary', True) and self.summarizer:
                 # Regular summarization
                 summary_result = await self._run_summarization(
-                    results['transcript'], options.get('topic'), progress_callback
+                    results['transcript'], options.get('topic'), progress_callback,
+                    summary_length=options.get('summary_length', 'medium'),
                 )
                 results['summary'] = summary_result
             else:
@@ -202,57 +203,88 @@ class PipelineOrchestrator:
         try:
             if progress_callback:
                 progress_callback("Running topic-based analysis...", 60)
-            
+
             if not transcript or not topic:
                 logger.warning("Topic-based summarization requires both transcript and topic")
                 return {
                     "summary": "Topic-based summarization requires both transcript and topic.",
+                    "summary_type": "topic_based",
+                    "key_points": [],
                     "method": "topic_based",
                     "topic": topic,
-                    "segments": []
+                    "segments": [],
                 }
-            
+
             logger.info(f"Running topic-based summarization for topic: {topic}")
-            
+
             # Extract text from transcript
             if isinstance(transcript, dict) and 'segments' in transcript:
                 segments = transcript['segments']
-                full_text = " ".join([seg.get('text', '') for seg in segments])
             else:
-                full_text = str(transcript) if transcript else ""
                 segments = []
-            
+
             # Topic-based analysis - find segments most relevant to the topic
             relevant_segments = self._find_topic_relevant_segments(segments, topic)
-            
-            # Generate topic-focused summary
-            topic_summary = self._generate_topic_summary(relevant_segments, topic)
-            
-            # Apply grammar smoothing and third-person conversion
-            topic_summary = self._smooth_grammar(topic_summary)
-            topic_summary = self._convert_to_third_person(topic_summary)
-            
+
+            # Try Gemini first for a coherent topic summary; fall back to the
+            # extractive scoring approach if Gemini is unavailable.
+            method = "topic_based"
+            try:
+                gemini_result = await self._summarize_with_gemini(
+                    " ".join(seg.get('text', '') for seg in relevant_segments[:30] or segments),
+                    topic=topic,
+                )
+                topic_summary = gemini_result.get("summary", "")
+                key_points = gemini_result.get("key_points", []) or self._derive_key_points(relevant_segments)
+            except Exception as gemini_err:
+                logger.warning(f"Gemini topic summary failed, falling back to extractive: {gemini_err}")
+                topic_summary = self._generate_topic_summary(relevant_segments, topic)
+                topic_summary = self._smooth_grammar(topic_summary)
+                topic_summary = self._convert_to_third_person(topic_summary)
+                key_points = self._derive_key_points(relevant_segments)
+
             if progress_callback:
                 progress_callback("Topic-based analysis completed!", 70)
-            
+
             return {
                 "summary": topic_summary,
-                "method": "topic_based",
+                "summary_type": "topic_based",
+                "key_points": key_points,
+                "method": method,
                 "topic": topic,
-                "segments": relevant_segments[:5],  # Return top 5 relevant segments
+                "segments": relevant_segments[:5],
                 "total_segments_analyzed": len(segments),
-                "relevant_segments_found": len(relevant_segments)
+                "relevant_segments_found": len(relevant_segments),
             }
-            
+
         except Exception as e:
             logger.error(f"Topic-based summarization phase failed: {str(e)}")
             return {
                 "summary": f"Topic-based summarization failed: {str(e)}",
+                "summary_type": "topic_based",
+                "key_points": [],
                 "method": "topic_based",
                 "topic": topic,
                 "segments": [],
-                "error": str(e)
+                "error": str(e),
             }
+
+    def _derive_key_points(self, segments: List[Dict[str, Any]], max_points: int = 5) -> List[str]:
+        """Pull short, readable bullets from the top relevant segments."""
+        bullets = []
+        for seg in segments[:max_points * 2]:
+            text = seg.get('text', '').strip()
+            if not text:
+                continue
+            # First sentence, capped at ~140 chars
+            first = re.split(r'(?<=[.!?])\s+', text)[0].strip()
+            if len(first) > 140:
+                first = first[:137].rstrip() + "..."
+            if len(first) >= 12 and first not in bullets:
+                bullets.append(first)
+            if len(bullets) >= max_points:
+                break
+        return bullets
     
     def _find_topic_relevant_segments(self, segments: List[Dict[str, Any]], topic: str) -> List[Dict[str, Any]]:
         """Find segments most relevant to the given topic"""
@@ -342,11 +374,18 @@ class PipelineOrchestrator:
         
         return summary
     
+    LENGTH_PROFILES = {
+        "short":  {"paragraphs": "1-2 paragraphs", "kp_count": 3, "kp_label": "3 key points"},
+        "medium": {"paragraphs": "3-5 paragraphs", "kp_count": 5, "kp_label": "5 key points"},
+        "long":   {"paragraphs": "6-8 paragraphs", "kp_count": 8, "kp_label": "8 key points"},
+    }
+
     async def _run_summarization(
         self,
         transcript: Optional[Dict[str, Any]],
         topic: Optional[str],
-        progress_callback: Optional[Callable] = None
+        progress_callback: Optional[Callable] = None,
+        summary_length: str = "medium",
     ) -> Dict[str, Any]:
         """Run summarization phase — Gemini primary, extractive fallback"""
         try:
@@ -366,30 +405,36 @@ class PipelineOrchestrator:
             original_word_count = len(full_text.split())
 
             try:
-                result = await self._summarize_with_gemini(full_text, topic)
+                result = await self._summarize_with_gemini(full_text, topic, summary_length=summary_length)
                 if progress_callback:
                     progress_callback("AI summary complete", 55)
                 result['original_word_count'] = original_word_count
                 result['duration'] = duration
                 result['language'] = language
+                result['summary_length'] = summary_length
                 return result
             except Exception as e:
                 logger.warning(f"Gemini summarization failed, falling back to extractive: {e}")
                 if progress_callback:
                     progress_callback("Generating summary...", 50)
+                # Map length → max_sentences for extractive fallback
+                fallback_max = {"short": 3, "medium": 5, "long": 9}.get(summary_length, 5)
                 extractive = await self.summarizer.generate_summary(
-                    transcript, topic, "extractive", progress_callback=progress_callback
+                    transcript, topic, "extractive",
+                    max_sentences=fallback_max,
+                    progress_callback=progress_callback,
                 )
                 if isinstance(extractive, dict):
                     extractive['summary_type'] = 'extractive'
                     extractive['key_points'] = []
+                    extractive['summary_length'] = summary_length
                 return extractive
 
         except SummarizationError as e:
             logger.error(f"Summarization phase failed: {str(e)}")
             raise
 
-    async def _summarize_with_gemini(self, transcript_text: str, topic: Optional[str] = None) -> Dict[str, Any]:
+    async def _summarize_with_gemini(self, transcript_text: str, topic: Optional[str] = None, summary_length: str = "medium") -> Dict[str, Any]:
         """Generate summary + key points using Gemini"""
         import google.generativeai as genai
 
@@ -400,8 +445,10 @@ class PipelineOrchestrator:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel('gemini-2.5-flash-lite')
 
+        profile = self.LENGTH_PROFILES.get(summary_length, self.LENGTH_PROFILES["medium"])
         topic_hint = f"Topic focus: {topic}" if topic else "No specific topic — summarize the full content."
         text_slice = transcript_text[:14000]
+        bullets_template = "\n".join(f"- <key point {i+1}>" for i in range(profile["kp_count"]))
 
         prompt = f"""You are summarizing a video transcript. Write clearly and concisely.
 
@@ -413,14 +460,10 @@ TRANSCRIPT:
 Respond in exactly this format (no extra text before or after):
 
 SUMMARY:
-<3-5 paragraph summary of the video content. Write in third person. Be specific about what is taught or discussed.>
+<{profile["paragraphs"]} summary of the video content. Write in third person. Be specific about what is taught or discussed.>
 
-KEY POINTS:
-- <key point 1>
-- <key point 2>
-- <key point 3>
-- <key point 4>
-- <key point 5>"""
+KEY POINTS ({profile["kp_label"]}):
+{bullets_template}"""
 
         response = model.generate_content(prompt)
         raw = response.text.strip()
@@ -428,10 +471,12 @@ KEY POINTS:
         summary = ""
         key_points = []
 
-        if "SUMMARY:" in raw and "KEY POINTS:" in raw:
-            parts = raw.split("KEY POINTS:")
+        if "SUMMARY:" in raw and "KEY POINTS" in raw:
+            parts = raw.split("KEY POINTS", 1)
             summary = parts[0].replace("SUMMARY:", "").strip()
-            bullets = parts[1].strip().split("\n")
+            # The marker may include "(N key points):" — drop everything until first newline
+            bullets_block = parts[1].split("\n", 1)[1] if "\n" in parts[1] else parts[1]
+            bullets = bullets_block.strip().split("\n")
             key_points = [b.lstrip("- •*").strip() for b in bullets if b.strip() and b.strip() not in ("-", "•", "*")]
         else:
             summary = raw
@@ -442,6 +487,7 @@ KEY POINTS:
             "key_points": key_points,
             "summary_type": "gemini",
             "model": "gemini-2.5-flash-lite",
+            "summary_length": summary_length,
             "word_count": len(summary.split()),
         }
     
