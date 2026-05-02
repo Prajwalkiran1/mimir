@@ -1,171 +1,333 @@
-"""Phase 2: Keyframe Extraction Component"""
+"""Phase 1: Keyframe Extraction with Adaptive k-means++ Clustering (VideoRAG-KAIST)
+
+Performance notes:
+- Seek directly to each 1-second mark (no sequential full-fps decode)
+- Score computed inline on a 320x180 medium frame; full frame discarded immediately
+- Only selected keyframes are written to disk (not all 1fps frames)
+"""
 
 import os
+import math
+import time
+import logging
 import cv2
 import numpy as np
-import logging
-from typing import Dict, Any, List, Optional
-from pathlib import Path
+from typing import Dict, Any, List, Optional, Tuple
+
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import normalize
 
 logger = logging.getLogger(__name__)
 
+try:
+    import imagehash
+    from PIL import Image as PILImage
+    IMAGEHASH_AVAILABLE = True
+except ImportError:
+    IMAGEHASH_AVAILABLE = False
+    logger.warning("imagehash not installed; perceptual dedup disabled. Run: pip install imagehash")
+
+
 class KeyframeExtractor:
-    """Handles keyframe extraction from video files"""
-    
-    def __init__(self, max_keyframes: int = 10, min_interval: int = 5):
-        self.max_keyframes = max_keyframes
-        self.min_interval = min_interval  # Minimum seconds between keyframes
-        
+    """Adaptive clustering-based keyframe extractor (VideoRAG architecture)."""
+
+    FRAME_FPS = 1
+    CLUSTERS_PER_MIN = 4.0
+    MIN_CLUSTERS = 8
+    MAX_CLUSTERS = 120
+    W_SHARPNESS = 0.4
+    W_CONTRAST  = 0.3
+    W_EDGE      = 0.3
+    MIN_SCORE_THRESHOLD  = 0.15
+    MIN_FRAMES_PER_SCENE = 1
+    MAX_FRAMES_PER_SCENE = 5
+    SEC_PER_EXTRA_FRAME  = 15
+    HASH_THRESHOLD       = 8
+
+    def __init__(self, **kwargs):
+        pass
+
     async def extract_keyframes(
-        self, 
-        video_path: str, 
-        progress_callback: Optional[callable] = None
+        self,
+        video_path: str,
+        progress_callback: Optional[callable] = None,
+        transcript: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """
-        Extract keyframes from video file
-        
-        Args:
-            video_path: Path to the video file
-            progress_callback: Callback function for progress updates
-            
-        Returns:
-            Dictionary containing keyframe results
-        """
+        t0 = time.time()
         try:
             if progress_callback:
-                progress_callback("Initializing keyframe extraction...", 60)
-            
-            # Open video capture
-            cap = cv2.VideoCapture(video_path)
-            if not cap.isOpened():
-                raise KeyframeExtractionError("Failed to open video file")
-            
-            # Get video properties
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            duration = total_frames / fps
-            
+                progress_callback("Extracting frames at 1FPS...", 30)
+
+            frames_data, duration = self._sample_frames(video_path)
+
+            if not frames_data:
+                raise KeyframeExtractionError("No frames extracted from video")
+
             if progress_callback:
-                progress_callback("Analyzing video content...", 70)
-            
-            # Calculate frame intervals
-            frame_interval = self._calculate_frame_interval(total_frames, fps)
-            
+                progress_callback("Clustering frames (k-means++)...", 50)
+
+            cluster_labels, k = self._cluster_frames(frames_data, duration)
+
             if progress_callback:
-                progress_callback("Extracting keyframes...", 80)
-            
-            # Extract keyframes
-            keyframes = self._extract_frames_at_intervals(
-                cap, total_frames, frame_interval, fps, video_path
+                progress_callback("Segmenting visual scenes...", 62)
+
+            scene_segments = self._build_scene_segments(frames_data, cluster_labels, transcript)
+
+            if progress_callback:
+                progress_callback("Selecting and saving keyframes...", 72)
+
+            keyframes_dir = os.path.join(os.path.dirname(video_path), "frames")
+            os.makedirs(keyframes_dir, exist_ok=True)
+            keyframes = self._select_and_write_keyframes(
+                video_path, frames_data, scene_segments, keyframes_dir
             )
-            
-            cap.release()
-            
+
             if progress_callback:
-                progress_callback("Keyframe extraction completed!", 90)
-            
-            return {
-                'keyframes': keyframes,
-                'total_frames': total_frames,
-                'duration': duration,
-                'fps': fps,
-                'extracted_count': len(keyframes)
-            }
-            
-        except Exception as e:
-            logger.error(f"Keyframe extraction failed: {str(e)}")
-            raise KeyframeExtractionError(f"Failed to extract keyframes: {str(e)}")
-    
-    def _calculate_frame_interval(self, total_frames: int, fps: float) -> int:
-        """Calculate optimal frame interval for keyframe extraction"""
-        # Ensure minimum interval
-        min_frame_interval = int(self.min_interval * fps)
-        
-        # Calculate interval based on max keyframes
-        frame_interval = max(1, total_frames // self.max_keyframes)
-        
-        # Use the larger of the two intervals
-        return max(frame_interval, min_frame_interval)
-    
-    def _extract_frames_at_intervals(
-        self, 
-        cap: cv2.VideoCapture, 
-        total_frames: int, 
-        frame_interval: int, 
-        fps: float,
-        video_path: str
-    ) -> List[Dict[str, Any]]:
-        """Extract frames at calculated intervals"""
-        keyframes = []
-        
-        for i in range(0, total_frames, frame_interval):
-            cap.set(cv2.CAP_PROP_POS_FRAMES, i)
-            ret, frame = cap.read()
-            
-            if ret:
-                timestamp = i / fps
-                frame_filename = self._save_frame(frame, timestamp, video_path)
-                
-                # Analyze frame quality
-                quality_score = self._analyze_frame_quality(frame)
-                
-                keyframe_data = {
-                    'timestamp': timestamp,
-                    'frame_number': i,
-                    'frame_path': frame_filename,
-                    'quality_score': quality_score,
-                    'description': f"Keyframe at {timestamp:.2f}s"
+                progress_callback("Keyframe extraction complete!", 82)
+
+            sample_size = min(200, len(frames_data))
+            frame_scores_sample = [
+                {
+                    "timestamp": round(frames_data[i]["timestamp"], 2),
+                    "score":     round(frames_data[i]["score"], 4),
+                    "cluster":   int(cluster_labels[i]),
                 }
-                
-                keyframes.append(keyframe_data)
-                
-                # Limit to max_keyframes
-                if len(keyframes) >= self.max_keyframes:
-                    break
-        
-        return keyframes
-    
-    def _save_frame(self, frame: np.ndarray, timestamp: float, video_path: str) -> str:
-        """Save frame to file and return path"""
-        # Create frames directory
-        video_name = Path(video_path).stem
-        frames_dir = f"uploads/{video_name}/frames"
-        os.makedirs(frames_dir, exist_ok=True)
-        
-        # Generate filename
-        frame_filename = f"keyframe_{int(timestamp)}.jpg"
-        frame_path = os.path.join(frames_dir, frame_filename)
-        
-        # Save frame
-        cv2.imwrite(frame_path, frame)
-        
-        return frame_path
-    
-    def _analyze_frame_quality(self, frame: np.ndarray) -> float:
-        """Analyze frame quality (sharpness, contrast, etc.)"""
-        try:
-            # Convert to grayscale
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            
-            # Calculate Laplacian variance (sharpness)
-            laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-            
-            # Calculate contrast (standard deviation)
-            contrast = gray.std()
-            
-            # Normalize and combine scores
-            sharpness_score = min(laplacian_var / 1000, 1.0)  # Normalize to 0-1
-            contrast_score = min(contrast / 128, 1.0)  # Normalize to 0-1
-            
-            # Weighted combination
-            quality_score = (sharpness_score * 0.7 + contrast_score * 0.3)
-            
-            return quality_score
-            
+                for i in range(sample_size)
+            ]
+
+            return {
+                "keyframes":            keyframes,
+                "total_frames":         len(frames_data),
+                "total_frames_at_1fps": len(frames_data),
+                "duration":             round(duration, 2),
+                "fps":                  self.FRAME_FPS,
+                "extracted_count":      len(keyframes),
+                "cluster_k":            int(k),
+                "scene_count":          len(scene_segments),
+                "scene_segments":       scene_segments,
+                "frame_scores_sample":  frame_scores_sample,
+                "timing_sec":           round(time.time() - t0, 2),
+            }
+
         except Exception as e:
-            logger.warning(f"Frame quality analysis failed: {str(e)}")
-            return 0.5  # Default score
+            logger.error(f"Keyframe extraction failed: {e}")
+            raise KeyframeExtractionError(f"Failed to extract keyframes: {e}")
+
+    # ------------------------------------------------------------------ #
+    # Step 1: sample 1 frame per second, score inline, keep only small    #
+    # ------------------------------------------------------------------ #
+
+    def _sample_frames(
+        self, video_path: str
+    ) -> Tuple[List[Dict[str, Any]], float]:
+        """Seek directly to each 1-second mark; compute score inline; never keep full frame."""
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise KeyframeExtractionError("Cannot open video file")
+
+        native_fps  = cap.get(cv2.CAP_PROP_FPS) or 25.0
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration    = total_frames / native_fps if native_fps > 0 else 0.0
+
+        frames_data: List[Dict[str, Any]] = []
+        n_seconds = max(1, int(math.ceil(duration)))
+
+        for sec in range(n_seconds):
+            target_frame = int(round(sec * native_fps))
+            if target_frame >= total_frames:
+                break
+
+            cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+            ret, frame = cap.read()
+            if not ret:
+                continue
+
+            score = self._score_frame(frame)
+
+            small = cv2.resize(frame, (64, 64))
+            small_rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
+            # full frame is discarded here — never stored in the list
+
+            frames_data.append({
+                "timestamp": float(sec),
+                "frame_idx": target_frame,
+                "small_rgb": small_rgb,   # 64×64 — used for clustering
+                "score":     score,       # raw (unnormalized) — normalized below
+            })
+
+        cap.release()
+
+        # Min-max normalize scores across all frames
+        if frames_data:
+            raw_scores = [fd["score"] for fd in frames_data]
+            mn, mx = min(raw_scores), max(raw_scores)
+            rng = mx - mn if mx != mn else 1.0
+            for fd in frames_data:
+                fd["score"] = (fd["score"] - mn) / rng
+
+        return frames_data, duration
+
+    def _score_frame(self, frame: np.ndarray) -> float:
+        """Sharpness + contrast + edge density on a 320×180 downsample."""
+        med = cv2.resize(frame, (320, 180))
+        gray = cv2.cvtColor(med, cv2.COLOR_BGR2GRAY)
+        sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+        contrast  = float(gray.std())
+        edges     = cv2.Canny(gray, 100, 200)
+        edge_den  = float(np.count_nonzero(edges)) / edges.size
+        return self.W_SHARPNESS * sharpness + self.W_CONTRAST * contrast + self.W_EDGE * edge_den
+
+    # ------------------------------------------------------------------ #
+    # Step 2: k-means++ clustering on small_rgb features                  #
+    # ------------------------------------------------------------------ #
+
+    def _cluster_frames(
+        self, frames_data: List[Dict[str, Any]], duration: float
+    ) -> Tuple[np.ndarray, int]:
+        n = len(frames_data)
+        k = int(math.ceil((duration / 60.0) * self.CLUSTERS_PER_MIN))
+        k = max(self.MIN_CLUSTERS, min(self.MAX_CLUSTERS, k, n))
+
+        features = np.array(
+            [fd["small_rgb"].flatten().astype(np.float32) for fd in frames_data]
+        )
+        features = normalize(features)
+
+        kmeans = KMeans(n_clusters=k, init="k-means++", n_init=3, random_state=42)
+        labels = kmeans.fit_predict(features)
+        return labels, k
+
+    # ------------------------------------------------------------------ #
+    # Step 3: scene segmentation from contiguous cluster-label runs       #
+    # ------------------------------------------------------------------ #
+
+    def _build_scene_segments(
+        self,
+        frames_data: List[Dict[str, Any]],
+        labels: np.ndarray,
+        transcript: Optional[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        if not frames_data:
+            return []
+
+        words: List[Dict] = []
+        if transcript:
+            if "words" in transcript:
+                words = transcript["words"]
+            elif "segments" in transcript:
+                for seg in transcript["segments"]:
+                    words.extend(seg.get("words", []))
+
+        scenes: List[Dict[str, Any]] = []
+        scene_id = 0
+        current_label = int(labels[0])
+        scene_start_idx = 0
+
+        for i in range(1, len(frames_data) + 1):
+            is_last = i == len(frames_data)
+            label_changed = is_last or (int(labels[i]) != current_label)
+
+            if label_changed:
+                start_sec = frames_data[scene_start_idx]["timestamp"]
+                end_sec   = frames_data[i - 1]["timestamp"]
+                frame_indices = list(range(scene_start_idx, i))
+                scene_words = [
+                    w.get("word", "")
+                    for w in words
+                    if start_sec <= w.get("start", 0) <= end_sec
+                ]
+                scenes.append({
+                    "scene_id":        scene_id,
+                    "cluster_id":      current_label,
+                    "start_sec":       round(start_sec, 2),
+                    "end_sec":         round(end_sec, 2),
+                    "duration_sec":    round(end_sec - start_sec, 2),
+                    "frame_indices":   frame_indices,
+                    "frame_count":     len(frame_indices),
+                    "transcript_words": scene_words[:50],
+                })
+                scene_id += 1
+                if not is_last:
+                    current_label  = int(labels[i])
+                    scene_start_idx = i
+
+        return scenes
+
+    # ------------------------------------------------------------------ #
+    # Step 4: select keyframes per scene, write only those to disk        #
+    # ------------------------------------------------------------------ #
+
+    def _select_and_write_keyframes(
+        self,
+        video_path: str,
+        frames_data: List[Dict[str, Any]],
+        scene_segments: List[Dict[str, Any]],
+        keyframes_dir: str,
+    ) -> List[Dict[str, Any]]:
+        """Pick best frames per scene, then re-seek video to write only those."""
+        selected: List[Dict[str, Any]] = []  # {scene, frame_idx, timestamp, score, scene_id}
+
+        for scene in scene_segments:
+            indices   = scene["frame_indices"]
+            scene_dur = scene["duration_sec"]
+
+            n_kf = max(
+                self.MIN_FRAMES_PER_SCENE,
+                min(self.MAX_FRAMES_PER_SCENE, int(scene_dur / self.SEC_PER_EXTRA_FRAME)),
+            )
+
+            ranked = sorted(indices, key=lambda i: frames_data[i]["score"], reverse=True)
+            candidates = [i for i in ranked if frames_data[i]["score"] >= self.MIN_SCORE_THRESHOLD][:n_kf]
+
+            for idx in candidates:
+                selected.append({
+                    "list_idx":  idx,
+                    "frame_idx": frames_data[idx]["frame_idx"],
+                    "timestamp": frames_data[idx]["timestamp"],
+                    "score":     frames_data[idx]["score"],
+                    "scene_id":  scene["scene_id"],
+                    "cluster_id": scene["cluster_id"],
+                    "small_rgb": frames_data[idx]["small_rgb"],
+                })
+
+        # Re-open video once, seek to each selected frame, write JPEG
+        cap = cv2.VideoCapture(video_path)
+        keyframes: List[Dict[str, Any]] = []
+        seen_hashes: List = []
+        kf_id = 0
+
+        for sel in selected:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, sel["frame_idx"])
+            ret, full_frame = cap.read()
+            if not ret:
+                continue
+
+            if IMAGEHASH_AVAILABLE:
+                pil_img = PILImage.fromarray(cv2.cvtColor(full_frame, cv2.COLOR_BGR2RGB))
+                h = imagehash.phash(pil_img)
+                if any(h - ph < self.HASH_THRESHOLD for ph in seen_hashes):
+                    continue
+                seen_hashes.append(h)
+
+            ts = sel["timestamp"]
+            kf_filename = f"keyframe_sc{sel['scene_id']:03d}_kf{kf_id:03d}_t{ts:.3f}.jpg"
+            kf_path = os.path.join(keyframes_dir, kf_filename)
+            cv2.imwrite(kf_path, full_frame)
+
+            keyframes.append({
+                "keyframe_id":          f"kf_{kf_id:04d}",
+                "scene_id":             sel["scene_id"],
+                "cluster_id":           sel["cluster_id"],
+                "timestamp":            round(ts, 3),
+                "informativeness_score": round(sel["score"], 4),
+                "frame_path":           kf_path,
+                "description":          f"Scene {sel['scene_id']} keyframe at {ts:.1f}s",
+            })
+            kf_id += 1
+
+        cap.release()
+        return keyframes
+
 
 class KeyframeExtractionError(Exception):
-    """Custom exception for keyframe extraction errors"""
     pass

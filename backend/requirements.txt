@@ -36,6 +36,7 @@ pytorch-metric-learning
 opencv-python-headless
 Pillow
 ffmpeg-python
+imagehash>=4.3.1
 
 # Text processing
 nltk

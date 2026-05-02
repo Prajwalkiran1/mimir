@@ -97,48 +97,38 @@ class ApiService {
     }
   }
 
-  // Poll for status updates
-  async pollStatus(taskId, onUpdate, interval = 1000) {
-    console.log(`Starting polling for task ${taskId}`);
-    let pollCount = 0;
-    const maxPolls = 300; // Maximum 10 minutes of polling
-    
+  // Poll for status updates — time-based limit, adaptive interval
+  async pollStatus(taskId, onUpdate) {
+    const MAX_DURATION_MS = 30 * 60 * 1000; // 30-minute wall-clock cap
+    const FAST_INTERVAL = 2000;  // first 30s: check every 2s
+    const SLOW_INTERVAL = 5000;  // after 30s: back off to every 5s
+    const FAST_PHASE_MS = 30000;
+
+    const startTime = Date.now();
+
     const poll = async () => {
-      pollCount++;
-      console.log(`Poll attempt ${pollCount} for task ${taskId}`);
-      
+      const elapsed = Date.now() - startTime;
+
+      if (elapsed >= MAX_DURATION_MS) {
+        console.error(`Polling timed out after 30 minutes for task ${taskId}`);
+        onUpdate({ status: 'error', error: 'Processing timed out after 30 minutes' });
+        return;
+      }
+
       try {
         const status = await this.getStatus(taskId);
-        console.log(`Poll ${pollCount}: Status = ${status.status}, Progress = ${status.progress}%`);
-        
-        // Always call onUpdate to ensure UI updates
+
         onUpdate(status);
-        
-        // Continue polling if task is still processing or queued
+
         if (status.status === 'processing' || status.status === 'queued') {
-          if (pollCount < maxPolls) {
-            setTimeout(poll, interval);
-          } else {
-            console.error(`Max polling attempts reached for task ${taskId}`);
-            onUpdate({ status: 'error', error: 'Maximum polling time exceeded' });
-          }
-        } else if (status.status === 'completed') {
-          console.log(`Task ${taskId} completed successfully`);
-          // Ensure final update is sent
-          onUpdate(status);
-        } else if (status.status === 'failed') {
-          console.log(`Task ${taskId} failed`);
-          // Ensure final update is sent
-          onUpdate(status);
+          const interval = elapsed < FAST_PHASE_MS ? FAST_INTERVAL : SLOW_INTERVAL;
+          setTimeout(poll, interval);
         }
+        // completed / failed — stop polling; onUpdate already called above
       } catch (error) {
         console.error(`Polling error for task ${taskId}:`, error);
-        // Continue polling even on errors to prevent blank pages
-        if (pollCount < maxPolls) {
-          setTimeout(poll, interval);
-        } else {
-          onUpdate({ status: 'error', error: 'Maximum polling time exceeded' });
-        }
+        const interval = elapsed < FAST_PHASE_MS ? FAST_INTERVAL : SLOW_INTERVAL;
+        setTimeout(poll, interval);
       }
     };
 
@@ -235,6 +225,17 @@ class ApiService {
       return await response.json();
     } catch (error) {
       console.error('Logout error:', error);
+      throw error;
+    }
+  }
+
+  async getPipelineLogs(taskId) {
+    try {
+      const response = await fetch(`${this.baseURL}/api/v1/pipeline-logs/${taskId}`);
+      if (!response.ok) throw new Error(`Pipeline logs fetch failed: ${response.statusText}`);
+      return await response.json();
+    } catch (error) {
+      console.error('Pipeline logs error:', error);
       throw error;
     }
   }

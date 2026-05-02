@@ -11,15 +11,21 @@ const PageStyles = () => (
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:           #0a1a1a;
-      --glass-bg:     rgba(20, 55, 52, 0.45);
-      --glass-border: rgba(100, 210, 190, 0.18);
-      --glass-shine:  rgba(160, 240, 220, 0.07);
-      --teal:         #64d2c8;
-      --teal-dim:     rgba(100, 210, 200, 0.55);
-      --white:        #f0faf8;
-      --text:         rgba(220, 248, 242, 0.82);
-      --text-dim:     rgba(180, 230, 220, 0.5);
+      --bg:           #0a0f1a;
+      --bg-mid:       #0d1520;
+      --bg-light:     #111d2a;
+      --glass-bg:     rgba(20, 35, 55, 0.50);
+      --glass-border: rgba(201, 168, 76, 0.18);
+      --glass-shine:  rgba(240, 210, 130, 0.07);
+      --gold:         #c9a84c;
+      --gold-bright:  #f0d070;
+      --gold-dim:     rgba(201, 168, 76, 0.55);
+      --gold-faint:   rgba(201, 168, 76, 0.14);
+      --teal:         #c9a84c;
+      --teal-dim:     rgba(201, 168, 76, 0.55);
+      --white:        #fdf8ee;
+      --text:         rgba(248, 235, 190, 0.82);
+      --text-dim:     rgba(220, 195, 130, 0.5);
       --font-serif:   'DM Serif Display', Georgia, serif;
       --font-sans:    'DM Sans', sans-serif;
       --font-brand:   'Cinzel Decorative', cursive;
@@ -38,8 +44,8 @@ const PageStyles = () => (
     .login-mesh {
       position: fixed; inset: 0; pointer-events: none; z-index: 0;
       background-image:
-        linear-gradient(rgba(100,210,200,0.022) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(100,210,200,0.022) 1px, transparent 1px);
+        linear-gradient(rgba(201,168,76,0.022) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(201,168,76,0.022) 1px, transparent 1px);
       background-size: 72px 72px;
       mask-image: radial-gradient(ellipse 70% 70% at 50% 50%, black 10%, transparent 80%);
     }
@@ -50,13 +56,13 @@ const PageStyles = () => (
     }
     .login-orb-1 {
       width: 550px; height: 550px;
-      background: radial-gradient(circle, rgba(100,210,200,0.08) 0%, transparent 70%);
+      background: radial-gradient(circle, rgba(201,168,76,0.08) 0%, transparent 70%);
       top: -150px; right: -100px;
       animation: orbDrift 14s ease-in-out infinite;
     }
     .login-orb-2 {
       width: 400px; height: 400px;
-      background: radial-gradient(circle, rgba(80,160,150,0.06) 0%, transparent 70%);
+      background: radial-gradient(circle, rgba(160,120,40,0.06) 0%, transparent 70%);
       bottom: -80px; left: -80px;
       animation: orbDrift 18s ease-in-out infinite reverse;
     }
@@ -82,7 +88,7 @@ const PageStyles = () => (
     .login-card::before {
       content: '';
       position: absolute; top: 0; left: 12%; right: 12%; height: 1px;
-      background: linear-gradient(90deg, transparent, rgba(200,255,245,0.3), transparent);
+      background: linear-gradient(90deg, transparent, rgba(240,210,130,0.3), transparent);
       pointer-events: none;
     }
 
@@ -100,7 +106,7 @@ const PageStyles = () => (
     }
     .login-brand img {
       width: 36px; height: 36px; border-radius: 50%;
-      border: 1.5px solid rgba(100,210,200,0.35);
+      border: 1.5px solid rgba(201,168,76,0.35);
     }
     .login-brand-name {
       font-family: var(--font-brand); font-size: 1.25rem;
@@ -109,15 +115,15 @@ const PageStyles = () => (
 
     .login-avatar {
       width: 64px; height: 64px; border-radius: 50%;
-      background: rgba(100,210,200,0.09);
-      border: 1.5px solid rgba(100,210,200,0.28);
+      background: rgba(201,168,76,0.09);
+      border: 1.5px solid rgba(201,168,76,0.28);
       display: flex; align-items: center; justify-content: center;
       margin: 0 auto 22px;
       position: relative;
     }
     .login-avatar::after {
       content: ''; position: absolute; inset: -5px; border-radius: 50%;
-      border: 1px solid rgba(100,210,200,0.1);
+      border: 1px solid rgba(201,168,76,0.1);
     }
 
     .login-eyebrow {
@@ -159,7 +165,7 @@ const PageStyles = () => (
     }
     .field-input {
       width: 100%;
-      background: rgba(5, 18, 18, 0.55);
+      background: rgba(5, 10, 20, 0.55);
       border: 1px solid var(--glass-border);
       border-radius: 12px;
       padding: 12px 14px 12px 42px;
@@ -170,8 +176,8 @@ const PageStyles = () => (
     }
     .field-input::placeholder { color: var(--text-dim); }
     .field-input:focus {
-      border-color: rgba(100,210,200,0.4);
-      box-shadow: 0 0 0 3px rgba(100,210,200,0.07);
+      border-color: rgba(201,168,76,0.4);
+      box-shadow: 0 0 0 3px rgba(201,168,76,0.07);
     }
     .field-input.error { border-color: rgba(220,38,38,0.35); }
     .field-input.pr { padding-right: 44px; }
@@ -206,26 +212,26 @@ const PageStyles = () => (
     /* Submit button */
     .btn-submit {
       width: 100%; padding: 13px;
-      background: linear-gradient(135deg, rgba(100,210,200,0.9) 0%, rgba(80,190,175,0.9) 100%);
-      border: 1px solid rgba(160,240,220,0.3);
-      border-radius: 100px; color: #061414;
+      background: linear-gradient(135deg, rgba(201,168,76,0.9) 0%, rgba(170,130,40,0.9) 100%);
+      border: 1px solid rgba(240,210,130,0.3);
+      border-radius: 100px; color: #0a0f1a;
       font-family: var(--font-sans); font-size: 0.9rem; font-weight: 500;
       cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 6px 20px rgba(100,210,200,0.2);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 6px 20px rgba(201,168,76,0.2);
       transition: all 0.3s cubic-bezier(0.23,1,0.32,1);
       margin-top: 4px;
     }
     .btn-submit:hover:not(:disabled) {
       transform: translateY(-2px);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 10px 32px rgba(100,210,200,0.3);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 10px 32px rgba(201,168,76,0.3);
     }
     .btn-submit:disabled { opacity: 0.55; cursor: not-allowed; }
 
     /* Spinner */
     .spin-ring {
       width: 16px; height: 16px; border-radius: 50%;
-      border: 2px solid rgba(6,20,20,0.3);
-      border-top-color: #061414;
+      border: 2px solid rgba(10,15,26,0.3);
+      border-top-color: #0a0f1a;
       animation: spinAnim 0.7s linear infinite;
     }
     @keyframes spinAnim { to { transform: rotate(360deg); } }
@@ -322,7 +328,7 @@ const Login = () => {
           </Link>
 
           <div className="login-avatar">
-            <User size={26} color="rgba(100,210,200,0.7)" />
+            <User size={26} color="rgba(201,168,76,0.7)" />
           </div>
 
           <p className="login-eyebrow">Welcome back</p>

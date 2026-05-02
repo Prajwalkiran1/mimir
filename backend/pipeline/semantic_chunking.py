@@ -1,338 +1,241 @@
-"""Semantic Chunking for Video Transcripts
+"""Semantic Chunking - Greedy Sequential Cosine-Drop Algorithm
 
-Intelligently segments transcripts into meaningful chunks based on:
-- Semantic coherence using sentence transformers
-- Temporal boundaries (speaker changes, pauses)
-- Token count limits
-- Topic continuity
+Follows the notebook (cumrag-latest) Phase 2.1-2.2 exactly:
+- Sentence segmentation with word-level timestamp preservation
+- SentenceTransformer embeddings (all-MiniLM-L6-v2)
+- Greedy loop: start new chunk when cosine similarity drops below SIM_THRESHOLD
+  OR token count exceeds MAX_CHUNK_TOKENS
+- Stores prev/next chunk pointers for temporal context expansion in retrieval
 """
 
 import logging
-import numpy as np
-from typing import List, Dict, Any, Optional
+import re
 import json
 import os
+import numpy as np
+from typing import List, Dict, Any, Optional
 from sentence_transformers import SentenceTransformer
-from sklearn.cluster import AgglomerativeClustering
-from sklearn.metrics.pairwise import cosine_similarity
-import nltk
-from nltk.tokenize import sent_tokenize
-
-# Download required NLTK data
-try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    nltk.download('punkt')
 
 logger = logging.getLogger(__name__)
 
+SIM_THRESHOLD = 0.75      # cosine drop below this → start new chunk
+MAX_CHUNK_TOKENS = 400    # hard token ceiling per chunk
+
 
 class SemanticChunker:
-    """Intelligent transcript chunking based on semantic coherence"""
-    
-    def __init__(self, 
-                 model_name: str = "all-MiniLM-L6-v2",
-                 max_chunk_tokens: int = 512,
-                 min_chunk_tokens: int = 50,
-                 similarity_threshold: float = 0.3):
-        """
-        Initialize semantic chunker
-        
-        Args:
-            model_name: Sentence transformer model name
-            max_chunk_tokens: Maximum tokens per chunk
-            min_chunk_tokens: Minimum tokens per chunk
-            similarity_threshold: Minimum similarity for chunk merging
-        """
+    """Greedy cosine-drop semantic chunker (VideoRAG notebook implementation)."""
+
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2", **kwargs):
+        # Accept legacy params but ignore them
         self.model_name = model_name
-        self.max_chunk_tokens = max_chunk_tokens
-        self.min_chunk_tokens = min_chunk_tokens
-        self.similarity_threshold = similarity_threshold
-        self.model = None
-        
+        self.model: Optional[SentenceTransformer] = None
+
     def initialize(self):
-        """Load the sentence transformer model"""
-        try:
-            self.model = SentenceTransformer(self.model_name)
-            logger.info(f"Loaded sentence transformer: {self.model_name}")
-        except Exception as e:
-            logger.error(f"Failed to load sentence transformer: {e}")
-            raise
-    
-    def chunk_transcript(self, 
-                        transcript: Dict[str, Any], 
-                        video_id: str,
-                        progress_callback: Optional[callable] = None) -> List[Dict[str, Any]]:
-        """
-        Chunk transcript into semantically coherent segments
-        
-        Args:
-            transcript: Transcript dictionary with segments
-            video_id: Video identifier
-            progress_callback: Progress callback function
-            
-        Returns:
-            List of chunk dictionaries
-        """
+        self.model = SentenceTransformer(self.model_name)
+        logger.info(f"Loaded SentenceTransformer: {self.model_name}")
+
+    def chunk_transcript(
+        self,
+        transcript: Dict[str, Any],
+        video_id: str,
+        progress_callback: Optional[callable] = None,
+    ) -> List[Dict[str, Any]]:
         if not self.model:
             self.initialize()
-            
+
         if progress_callback:
-            progress_callback("Preparing transcript for chunking...", 10)
-        
-        # Extract sentences with timestamps
+            progress_callback("Segmenting transcript into sentences...", 10)
+
         sentences = self._extract_sentences(transcript)
-        
+        if not sentences:
+            logger.warning("No sentences extracted from transcript")
+            return []
+
         if progress_callback:
             progress_callback("Computing sentence embeddings...", 30)
-        
-        # Compute embeddings
+
+        texts = [s["text"] for s in sentences]
         embeddings = self.model.encode(
-            [s["text"] for s in sentences],
-            convert_to_numpy=True,
-            show_progress_bar=False
+            texts, convert_to_numpy=True, show_progress_bar=False
         )
-        
+        # L2 normalise for cosine via dot product
+        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        embeddings = embeddings / norms
+
         if progress_callback:
-            progress_callback("Performing semantic clustering...", 50)
-        
-        # Perform semantic clustering
-        clusters = self._semantic_clustering(sentences, embeddings)
-        
-        if progress_callback:
-            progress_callback("Creating coherent chunks...", 70)
-        
-        # Create chunks from clusters
-        chunks = self._create_chunks_from_clusters(clusters, video_id)
-        
-        if progress_callback:
-            progress_callback("Finalizing chunks...", 90)
-        
-        # Apply token limits and merge small chunks
-        chunks = self._apply_token_limits(chunks)
-        
+            progress_callback("Greedy cosine-drop chunking...", 60)
+
+        chunks = self._greedy_chunk(sentences, embeddings, video_id)
+
+        # Wire up prev/next pointers
+        for i, chunk in enumerate(chunks):
+            chunk["prev_chunk_id"] = chunks[i - 1]["chunk_id"] if i > 0 else None
+            chunk["next_chunk_id"] = (
+                chunks[i + 1]["chunk_id"] if i < len(chunks) - 1 else None
+            )
+
         if progress_callback:
             progress_callback(f"Created {len(chunks)} semantic chunks", 100)
-        
+
         return chunks
-    
-    def _extract_sentences(self, transcript: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Extract individual sentences with timestamps from transcript"""
-        sentences = []
-        
-        if "segments" in transcript:
-            for segment in transcript["segments"]:
-                segment_text = segment.get("text", "")
-                segment_start = segment.get("start", 0)
-                
-                # Split segment into sentences
-                segment_sentences = sent_tokenize(segment_text)
-                
-                # Distribute time across sentences
-                if len(segment_sentences) > 0:
-                    segment_duration = segment.get("end", segment_start) - segment_start
-                    time_per_sentence = segment_duration / len(segment_sentences)
-                    
-                    for i, sent in enumerate(segment_sentences):
-                        sentences.append({
-                            "text": sent.strip(),
-                            "time_start": segment_start + (i * time_per_sentence),
-                            "time_end": segment_start + ((i + 1) * time_per_sentence),
-                            "segment_id": segment.get("id", "")
-                        })
-        
+
+    # ------------------------------------------------------------------ #
+    # Internal helpers                                                     #
+    # ------------------------------------------------------------------ #
+
+    def _extract_sentences(
+        self, transcript: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """Build timestamped sentence list from transcript (word or segment level)."""
+        sentences: List[Dict[str, Any]] = []
+
+        # Collect flat word list (word-level timestamps are ideal)
+        words: List[Dict] = []
+        if "words" in transcript:
+            words = transcript["words"]
+        elif "segments" in transcript:
+            for seg in transcript["segments"]:
+                words.extend(seg.get("words", []))
+
+        if words:
+            buf: List[Dict] = []
+            for w in words:
+                buf.append(w)
+                text = w.get("word", "").strip()
+                if text and text[-1] in ".?!":
+                    sent_text = " ".join(
+                        cw.get("word", "").strip() for cw in buf
+                    ).strip()
+                    if sent_text:
+                        sentences.append(
+                            {
+                                "text": sent_text,
+                                "time_start": buf[0].get("start", 0),
+                                "time_end": buf[-1].get("end", 0),
+                            }
+                        )
+                    buf = []
+            # Flush remainder
+            if buf:
+                sent_text = " ".join(
+                    cw.get("word", "").strip() for cw in buf
+                ).strip()
+                if sent_text:
+                    sentences.append(
+                        {
+                            "text": sent_text,
+                            "time_start": buf[0].get("start", 0),
+                            "time_end": buf[-1].get("end", 0),
+                        }
+                    )
+        elif "segments" in transcript:
+            # Segment-level fallback: split on sentence-ending punctuation
+            for seg in transcript["segments"]:
+                seg_text = seg.get("text", "").strip()
+                seg_start = seg.get("start", 0)
+                seg_end = seg.get("end", 0)
+                parts = re.split(r"(?<=[.?!])\s+", seg_text)
+                parts = [p.strip() for p in parts if p.strip()]
+                if not parts:
+                    continue
+                duration = seg_end - seg_start
+                time_per = duration / len(parts)
+                for i, part in enumerate(parts):
+                    sentences.append(
+                        {
+                            "text": part,
+                            "time_start": seg_start + i * time_per,
+                            "time_end": seg_start + (i + 1) * time_per,
+                        }
+                    )
+
         return sentences
-    
-    def _semantic_clustering(self, sentences: List[Dict[str, Any]], embeddings: np.ndarray) -> List[List[Dict[str, Any]]]:
-        """Perform semantic clustering on sentences"""
-        if len(sentences) <= 1:
-            return [sentences]
-        
-        # Compute similarity matrix
-        similarity_matrix = cosine_similarity(embeddings)
-        
-        # Convert to distance matrix (1 - similarity)
-        distance_matrix = 1 - similarity_matrix
-        
-        # Determine optimal number of clusters
-        n_clusters = self._determine_optimal_clusters(similarity_matrix)
-        
-        # Perform agglomerative clustering
-        clustering = AgglomerativeClustering(
-            n_clusters=n_clusters,
-            metric='precomputed',
-            linkage='average'
-        )
-        
-        cluster_labels = clustering.fit_predict(distance_matrix)
-        
-        # Group sentences by cluster
-        clusters = {}
-        for sentence, label in zip(sentences, cluster_labels):
-            if label not in clusters:
-                clusters[label] = []
-            clusters[label].append(sentence)
-        
-        # Sort clusters by chronological order (first sentence timestamp)
-        sorted_clusters = sorted(
-            clusters.values(),
-            key=lambda cluster: cluster[0]["time_start"]
-        )
-        
-        return sorted_clusters
-    
-    def _determine_optimal_clusters(self, similarity_matrix: np.ndarray) -> int:
-        """Determine optimal number of clusters based on similarity distribution"""
-        # Calculate average similarity
-        avg_similarity = np.mean(similarity_matrix[np.triu_indices_from(similarity_matrix, k=1)])
-        
-        # Estimate number of clusters based on similarity threshold
-        if avg_similarity > 0.7:
-            return max(1, len(similarity_matrix) // 10)
-        elif avg_similarity > 0.5:
-            return max(1, len(similarity_matrix) // 7)
-        elif avg_similarity > 0.3:
-            return max(1, len(similarity_matrix) // 5)
-        else:
-            return max(1, len(similarity_matrix) // 3)
-    
-    def _create_chunks_from_clusters(self, clusters: List[List[Dict[str, Any]]], video_id: str) -> List[Dict[str, Any]]:
-        """Create chunk dictionaries from clusters"""
-        chunks = []
-        
-        for i, cluster in enumerate(clusters):
-            if not cluster:
-                continue
-                
-            # Combine cluster sentences
-            chunk_text = " ".join([s["text"] for s in cluster])
-            
-            # Get time range
-            time_start = cluster[0]["time_start"]
-            time_end = cluster[-1]["time_end"]
-            
-            # Create chunk
-            chunk = {
-                "chunk_id": f"{video_id}_chunk_{i:04d}",
-                "chunk_index": i,
-                "video_id": video_id,
-                "text": chunk_text,
-                "token_count": len(chunk_text.split()),
-                "time_start": time_start,
-                "time_end": time_end,
-                "sentence_count": len(cluster),
-                "segment_ids": list(set([s.get("segment_id") for s in cluster]))
-            }
-            
-            chunks.append(chunk)
-        
+
+    def _greedy_chunk(
+        self,
+        sentences: List[Dict[str, Any]],
+        embeddings: np.ndarray,
+        video_id: str,
+    ) -> List[Dict[str, Any]]:
+        if not sentences:
+            return []
+
+        chunks: List[Dict[str, Any]] = []
+        chunk_idx = 0
+
+        buf_sentences = [sentences[0]]
+        buf_emb = embeddings[0].copy()
+        buf_tokens = len(sentences[0]["text"].split())
+
+        for i in range(1, len(sentences)):
+            sent = sentences[i]
+            emb = embeddings[i]
+            tokens = len(sent["text"].split())
+
+            # Cosine similarity between current buffer centroid and next sentence
+            sim = float(np.dot(buf_emb, emb))
+
+            if sim < SIM_THRESHOLD or buf_tokens + tokens > MAX_CHUNK_TOKENS:
+                chunks.append(
+                    self._make_chunk(buf_sentences, chunk_idx, video_id, buf_emb)
+                )
+                chunk_idx += 1
+                buf_sentences = [sent]
+                buf_emb = emb.copy()
+                buf_tokens = tokens
+            else:
+                buf_sentences.append(sent)
+                # Running mean of L2-normalised embeddings (approximate centroid)
+                n = len(buf_sentences)
+                buf_emb = ((n - 1) * buf_emb + emb) / n
+                norm = np.linalg.norm(buf_emb)
+                if norm > 0:
+                    buf_emb /= norm
+                buf_tokens += tokens
+
+        if buf_sentences:
+            chunks.append(
+                self._make_chunk(buf_sentences, chunk_idx, video_id, buf_emb)
+            )
+
         return chunks
-    
-    def _apply_token_limits(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Apply token limits and merge small chunks"""
-        if not chunks:
-            return chunks
-        
-        processed_chunks = []
-        current_chunk = None
-        
-        for chunk in chunks:
-            token_count = chunk["token_count"]
-            
-            # If chunk is too small and we have a current chunk, merge it
-            if (token_count < self.min_chunk_tokens and 
-                current_chunk and 
-                current_chunk["token_count"] + token_count <= self.max_chunk_tokens):
-                
-                # Merge with current chunk
-                current_chunk["text"] += " " + chunk["text"]
-                current_chunk["token_count"] += token_count
-                current_chunk["time_end"] = chunk["time_end"]
-                current_chunk["sentence_count"] += chunk["sentence_count"]
-                current_chunk["segment_ids"].extend(chunk["segment_ids"])
-                
-            else:
-                # Save current chunk if it exists
-                if current_chunk:
-                    processed_chunks.append(current_chunk)
-                
-                # Start new chunk (or split if too large)
-                if token_count <= self.max_chunk_tokens:
-                    current_chunk = chunk.copy()
-                else:
-                    # Split large chunk
-                    split_chunks = self._split_large_chunk(chunk)
-                    processed_chunks.extend(split_chunks)
-                    current_chunk = None
-        
-        # Add the last chunk
-        if current_chunk:
-            processed_chunks.append(current_chunk)
-        
-        return processed_chunks
-    
-    def _split_large_chunk(self, chunk: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Split a chunk that exceeds token limits"""
-        sentences = chunk["text"].split(". ")
-        split_chunks = []
-        
-        current_text = ""
-        current_tokens = 0
-        chunk_index = chunk["chunk_index"]
-        
-        for i, sentence in enumerate(sentences):
-            sentence_tokens = len(sentence.split())
-            
-            if current_tokens + sentence_tokens > self.max_chunk_tokens and current_text:
-                # Create chunk from accumulated text
-                split_chunk = {
-                    "chunk_id": f"{chunk['video_id']}_chunk_{chunk_index:04d}_{len(split_chunks)}",
-                    "chunk_index": chunk_index,
-                    "video_id": chunk["video_id"],
-                    "text": current_text.strip(),
-                    "token_count": current_tokens,
-                    "time_start": chunk["time_start"],
-                    "time_end": chunk["time_start"] + (chunk["time_end"] - chunk["time_start"]) * (i / len(sentences)),
-                    "sentence_count": current_text.count(". ") + 1,
-                    "segment_ids": chunk["segment_ids"]
-                }
-                split_chunks.append(split_chunk)
-                
-                # Reset
-                current_text = sentence
-                current_tokens = sentence_tokens
-            else:
-                current_text += ". " + sentence if current_text else sentence
-                current_tokens += sentence_tokens
-        
-        # Add remaining text
-        if current_text:
-            split_chunk = {
-                "chunk_id": f"{chunk['video_id']}_chunk_{chunk_index:04d}_{len(split_chunks)}",
-                "chunk_index": chunk_index,
-                "video_id": chunk["video_id"],
-                "text": current_text.strip(),
-                "token_count": current_tokens,
-                "time_start": chunk["time_start"],
-                "time_end": chunk["time_end"],
-                "sentence_count": current_text.count(". ") + 1,
-                "segment_ids": chunk["segment_ids"]
-            }
-            split_chunks.append(split_chunk)
-        
-        return split_chunks
-    
-    def save_chunks(self, chunks: List[Dict[str, Any]], output_dir: str, video_id: str):
-        """Save chunks to disk"""
+
+    @staticmethod
+    def _make_chunk(
+        sentences: List[Dict[str, Any]],
+        idx: int,
+        video_id: str,
+        embedding: np.ndarray,
+    ) -> Dict[str, Any]:
+        text = " ".join(s["text"] for s in sentences)
+        return {
+            "chunk_id": f"{video_id}_chunk_{idx:04d}",
+            "chunk_index": idx,
+            "video_id": video_id,
+            "text": text,
+            "time_start": sentences[0]["time_start"],
+            "time_end": sentences[-1]["time_end"],
+            "token_count": len(text.split()),
+            "sentence_count": len(sentences),
+            "embedding": embedding.tolist(),
+            "prev_chunk_id": None,   # filled in after all chunks are built
+            "next_chunk_id": None,
+        }
+
+    def save_chunks(
+        self,
+        chunks: List[Dict[str, Any]],
+        output_dir: str,
+        video_id: str,
+    ) -> str:
         os.makedirs(output_dir, exist_ok=True)
-        
-        # Save without embeddings for readability
         chunks_path = os.path.join(output_dir, f"{video_id}_chunks.json")
-        chunks_readable = [{k: v for k, v in chunk.items() if k != "embedding"} for chunk in chunks]
-        
-        with open(chunks_path, "w") as f:
-            json.dump(chunks_readable, f, indent=2)
-        
+        readable = [
+            {k: v for k, v in chunk.items() if k != "embedding"}
+            for chunk in chunks
+        ]
+        with open(chunks_path, "w", encoding="utf-8") as f:
+            json.dump(readable, f, indent=2)
         logger.info(f"Saved {len(chunks)} chunks to {chunks_path}")
-        
         return chunks_path

@@ -16,20 +16,22 @@ const GlobalStyles = () => (
     html { scroll-behavior: smooth; }
 
     :root {
-      --bg:          #0a1a1a;
-      --bg-mid:      #0d2020;
-      --bg-light:    #112828;
-      --glass-bg:    rgba(20, 55, 52, 0.45);
-      --glass-border:rgba(100, 210, 190, 0.18);
-      --glass-shine: rgba(160, 240, 220, 0.07);
-      --teal:        #64d2c8;
-      --teal-dim:    rgba(100, 210, 200, 0.55);
-      --teal-faint:  rgba(100, 210, 200, 0.18);
+      --bg:          #0a0f1a;
+      --bg-mid:      #0d1520;
+      --bg-light:    #111d2a;
+      --glass-bg:    rgba(20, 35, 55, 0.50);
+      --glass-border:rgba(201, 168, 76, 0.18);
+      --glass-shine: rgba(240, 210, 130, 0.07);
       --gold:        #c9a84c;
-      --gold-faint:  rgba(201, 168, 76, 0.15);
-      --white:       #f0faf8;
-      --text:        rgba(220, 248, 242, 0.82);
-      --text-dim:    rgba(180, 230, 220, 0.5);
+      --gold-bright: #f0d070;
+      --gold-dim:    rgba(201, 168, 76, 0.55);
+      --gold-faint:  rgba(201, 168, 76, 0.14);
+      --teal:        #c9a84c;
+      --teal-dim:    rgba(201, 168, 76, 0.55);
+      --teal-faint:  rgba(201, 168, 76, 0.18);
+      --white:       #fdf8ee;
+      --text:        rgba(248, 235, 190, 0.82);
+      --text-dim:    rgba(220, 195, 130, 0.5);
       --font-serif:  'DM Serif Display', Georgia, serif;
       --font-sans:   'DM Sans', sans-serif;
       --font-brand:  'Cinzel Decorative', cursive;
@@ -44,7 +46,7 @@ const GlobalStyles = () => (
     /* ── Scrollbar ── */
     ::-webkit-scrollbar { width: 5px; }
     ::-webkit-scrollbar-track { background: var(--bg); }
-    ::-webkit-scrollbar-thumb { background: rgba(100,210,200,0.25); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb { background: rgba(201,168,76,0.25); border-radius: 3px; }
 
     /* ── Nav ── */
     .lp-nav {
@@ -64,7 +66,7 @@ const GlobalStyles = () => (
     }
 
     .nav-brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
-    .nav-brand img { width: 36px; height: 36px; border-radius: 50%; border: 1.5px solid rgba(100,210,200,0.3); }
+    .nav-brand img { width: 36px; height: 36px; border-radius: 50%; border: 1.5px solid rgba(201,168,76,0.3); }
     .nav-brand-name { font-family: var(--font-brand); font-size: 1.2rem; color: var(--teal); letter-spacing: 0.02em; }
 
     .nav-links { display: flex; align-items: center; gap: 2.5rem; }
@@ -96,21 +98,21 @@ const GlobalStyles = () => (
       background: radial-gradient(circle at 50% 0%, rgba(160,240,220,0.18) 0%, transparent 70%);
       opacity: 0; transition: opacity 0.3s;
     }
-    .btn-glass:hover { border-color: rgba(100,210,200,0.4); box-shadow: inset 0 1px 0 rgba(160,240,220,0.14), 0 8px 28px rgba(0,0,0,0.35), 0 0 0 1px rgba(100,210,200,0.12); transform: translateY(-1px); }
+    .btn-glass:hover { border-color: rgba(201,168,76,0.4); box-shadow: inset 0 1px 0 rgba(160,240,220,0.14), 0 8px 28px rgba(0,0,0,0.35), 0 0 0 1px rgba(201,168,76,0.12); transform: translateY(-1px); }
     .btn-glass:hover::after { opacity: 1; }
 
     .btn-teal {
       font-family: var(--font-sans); font-size: 0.85rem; font-weight: 500;
       padding: 11px 28px; border-radius: 100px;
-      background: linear-gradient(135deg, rgba(100,210,200,0.9) 0%, rgba(80,190,175,0.9) 100%);
+      background: linear-gradient(135deg, rgba(201,168,76,0.9) 0%, rgba(80,190,175,0.9) 100%);
       border: 1px solid rgba(160,240,220,0.3);
       color: #061414; cursor: pointer; text-decoration: none;
       display: inline-flex; align-items: center; gap: 8px;
       backdrop-filter: blur(8px);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 6px 24px rgba(100,210,200,0.22);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 6px 24px rgba(201,168,76,0.22);
       transition: all 0.3s cubic-bezier(0.23,1,0.32,1);
     }
-    .btn-teal:hover { transform: translateY(-2px); box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 10px 36px rgba(100,210,200,0.32); }
+    .btn-teal:hover { transform: translateY(-2px); box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 10px 36px rgba(201,168,76,0.32); }
 
     .btn-outline {
       font-family: var(--font-sans); font-size: 0.85rem; font-weight: 400;
@@ -121,7 +123,7 @@ const GlobalStyles = () => (
       display: inline-flex; align-items: center; gap: 8px;
       transition: all 0.3s cubic-bezier(0.23,1,0.32,1);
     }
-    .btn-outline:hover { border-color: rgba(100,210,200,0.4); color: var(--teal); }
+    .btn-outline:hover { border-color: rgba(201,168,76,0.4); color: var(--teal); }
 
     /* ── Hero ── */
     .hero {
@@ -147,7 +149,7 @@ const GlobalStyles = () => (
     }
     .orb-1 {
       width: 600px; height: 600px;
-      background: radial-gradient(circle, rgba(100,210,200,0.09) 0%, transparent 70%);
+      background: radial-gradient(circle, rgba(201,168,76,0.09) 0%, transparent 70%);
       top: -150px; right: 5%;
       animation: orbDrift 12s ease-in-out infinite;
     }
@@ -174,8 +176,8 @@ const GlobalStyles = () => (
     .hero-mesh {
       position: absolute; inset: 0; pointer-events: none;
       background-image:
-        linear-gradient(rgba(100,210,200,0.025) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(100,210,200,0.025) 1px, transparent 1px);
+        linear-gradient(rgba(201,168,76,0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(201,168,76,0.025) 1px, transparent 1px);
       background-size: 72px 72px;
       mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, black 10%, transparent 80%);
     }
@@ -196,8 +198,8 @@ const GlobalStyles = () => (
     .eyebrow {
       display: inline-flex; align-items: center; gap: 8px;
       padding: 5px 14px 5px 8px; border-radius: 100px;
-      background: rgba(100,210,200,0.08);
-      border: 1px solid rgba(100,210,200,0.2);
+      background: rgba(201,168,76,0.08);
+      border: 1px solid rgba(201,168,76,0.2);
       font-size: 0.72rem; font-weight: 500; letter-spacing: 0.1em;
       color: var(--teal); text-transform: uppercase; margin-bottom: 28px;
       animation: riseIn 0.8s cubic-bezier(0.23,1,0.32,1) 0.2s both;
@@ -255,7 +257,7 @@ const GlobalStyles = () => (
       content: '';
       position: absolute; top: -30%; left: -20%;
       width: 140%; height: 60%;
-      background: radial-gradient(ellipse, rgba(100,210,200,0.06) 0%, transparent 70%);
+      background: radial-gradient(ellipse, rgba(201,168,76,0.06) 0%, transparent 70%);
       pointer-events: none;
     }
 
@@ -270,20 +272,20 @@ const GlobalStyles = () => (
 
     .panel-item {
       background: rgba(10,30,28,0.5);
-      border: 1px solid rgba(100,210,200,0.1);
+      border: 1px solid rgba(201,168,76,0.1);
       border-radius: 14px; padding: 14px;
       display: flex; align-items: flex-start; gap: 11px;
       transition: all 0.3s cubic-bezier(0.23,1,0.32,1);
     }
     .panel-item:hover {
-      border-color: rgba(100,210,200,0.25);
+      border-color: rgba(201,168,76,0.25);
       background: rgba(10,40,36,0.6);
       transform: translateY(-2px);
     }
 
     .pi-icon {
       width: 32px; height: 32px; border-radius: 9px; flex-shrink: 0;
-      background: rgba(100,210,200,0.1); display: flex; align-items: center; justify-content: center;
+      background: rgba(201,168,76,0.1); display: flex; align-items: center; justify-content: center;
     }
     .pi-title { font-size: 0.82rem; font-weight: 500; color: var(--white); }
     .pi-sub { font-size: 0.7rem; color: var(--text-dim); margin-top: 2px; line-height: 1.4; }
@@ -293,7 +295,7 @@ const GlobalStyles = () => (
       margin-top: 16px;
       padding: 12px 16px;
       background: rgba(10,30,28,0.55);
-      border: 1px solid rgba(100,210,200,0.1);
+      border: 1px solid rgba(201,168,76,0.1);
       border-radius: 12px;
       display: flex; align-items: center; gap: 12px;
     }
@@ -302,7 +304,7 @@ const GlobalStyles = () => (
     }
     .status-ring-track {
       position: absolute; inset: 0; border-radius: 50%;
-      border: 1.5px solid rgba(100,210,200,0.15);
+      border: 1.5px solid rgba(201,168,76,0.15);
     }
     .status-ring-spin {
       position: absolute; inset: 0; border-radius: 50%;
@@ -338,7 +340,7 @@ const GlobalStyles = () => (
 
     .section-divider {
       height: 1px;
-      background: linear-gradient(90deg, transparent, rgba(100,210,200,0.14) 30%, rgba(100,210,200,0.14) 70%, transparent);
+      background: linear-gradient(90deg, transparent, rgba(201,168,76,0.14) 30%, rgba(201,168,76,0.14) 70%, transparent);
     }
 
     /* Section header */
@@ -374,18 +376,18 @@ const GlobalStyles = () => (
     .feat-card::before {
       content: '';
       position: absolute; top: 0; left: 0; right: 0; height: 1px;
-      background: linear-gradient(90deg, transparent, rgba(100,210,200,0.3), transparent);
+      background: linear-gradient(90deg, transparent, rgba(201,168,76,0.3), transparent);
     }
     .feat-card:hover {
       transform: translateY(-5px);
-      border-color: rgba(100,210,200,0.3);
-      box-shadow: inset 0 1px 0 rgba(200,255,245,0.12), 0 20px 56px rgba(0,0,0,0.45), 0 0 0 1px rgba(100,210,200,0.08);
+      border-color: rgba(201,168,76,0.3);
+      box-shadow: inset 0 1px 0 rgba(200,255,245,0.12), 0 20px 56px rgba(0,0,0,0.45), 0 0 0 1px rgba(201,168,76,0.08);
     }
 
     /* Hover glow layer */
     .feat-card-glow {
       position: absolute; inset: 0; border-radius: inherit;
-      background: radial-gradient(circle at 50% 0%, rgba(100,210,200,0.07) 0%, transparent 65%);
+      background: radial-gradient(circle at 50% 0%, rgba(201,168,76,0.07) 0%, transparent 65%);
       opacity: 0; transition: opacity 0.4s;
       pointer-events: none;
     }
@@ -393,13 +395,13 @@ const GlobalStyles = () => (
 
     .feat-icon {
       width: 42px; height: 42px; border-radius: 12px;
-      background: rgba(100,210,200,0.09);
-      border: 1px solid rgba(100,210,200,0.15);
+      background: rgba(201,168,76,0.09);
+      border: 1px solid rgba(201,168,76,0.15);
       display: flex; align-items: center; justify-content: center;
       margin-bottom: 20px; position: relative; z-index: 1;
       transition: background 0.3s;
     }
-    .feat-card:hover .feat-icon { background: rgba(100,210,200,0.15); }
+    .feat-card:hover .feat-icon { background: rgba(201,168,76,0.15); }
 
     .feat-title {
       font-family: var(--font-serif); font-size: 1.05rem;
@@ -421,7 +423,7 @@ const GlobalStyles = () => (
       box-shadow: inset 0 1px 0 var(--glass-shine), 0 12px 40px rgba(0,0,0,0.35);
       transition: all 0.4s cubic-bezier(0.23,1,0.32,1);
     }
-    .step-card:hover { transform: translateY(-6px); border-color: rgba(100,210,200,0.28); box-shadow: inset 0 1px 0 rgba(200,255,245,0.12), 0 24px 64px rgba(0,0,0,0.5); }
+    .step-card:hover { transform: translateY(-6px); border-color: rgba(201,168,76,0.28); box-shadow: inset 0 1px 0 rgba(200,255,245,0.12), 0 24px 64px rgba(0,0,0,0.5); }
 
     /* Image zone */
     .step-img-zone {
@@ -438,24 +440,24 @@ const GlobalStyles = () => (
     .step-img-grid {
       position: absolute; inset: 0;
       background-image:
-        linear-gradient(rgba(100,210,200,0.04) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(100,210,200,0.04) 1px, transparent 1px);
+        linear-gradient(rgba(201,168,76,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(201,168,76,0.04) 1px, transparent 1px);
       background-size: 28px 28px;
     }
 
-    .step-img-icon { color: rgba(100,210,200,0.35); position: relative; z-index: 1; }
+    .step-img-icon { color: rgba(201,168,76,0.35); position: relative; z-index: 1; }
 
     .step-img-placeholder {
       position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
       font-size: 0.6rem; letter-spacing: 0.18em; text-transform: uppercase;
-      color: rgba(100,210,200,0.25); white-space: nowrap;
+      color: rgba(201,168,76,0.25); white-space: nowrap;
     }
 
     /* Step number */
     .step-num {
       position: absolute; top: 14px; left: 18px;
       font-family: var(--font-serif); font-size: 0.72rem; font-style: italic;
-      color: rgba(100,210,200,0.45); letter-spacing: 0.05em;
+      color: rgba(201,168,76,0.45); letter-spacing: 0.05em;
     }
 
     .step-content { padding: 22px 24px 26px; }
@@ -473,7 +475,7 @@ const GlobalStyles = () => (
     }
     @media (max-width: 780px) { .steps-connector { display: none; } }
     .connector-cell { display: flex; align-items: center; justify-content: center; }
-    .connector-line { flex: 1; height: 1px; background: linear-gradient(90deg, rgba(100,210,200,0.15), rgba(100,210,200,0.05)); margin: 0 20px; }
+    .connector-line { flex: 1; height: 1px; background: linear-gradient(90deg, rgba(201,168,76,0.15), rgba(201,168,76,0.05)); margin: 0 20px; }
 
     /* ── Contact ── */
     .contact-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; }
@@ -493,13 +495,13 @@ const GlobalStyles = () => (
     }
     .contact-card::before {
       content: ''; position: absolute; top: 0; left: 10%; right: 10%; height: 1px;
-      background: linear-gradient(90deg, transparent, rgba(100,210,200,0.28), transparent);
+      background: linear-gradient(90deg, transparent, rgba(201,168,76,0.28), transparent);
     }
-    .contact-card:hover { transform: translateY(-5px); border-color: rgba(100,210,200,0.28); box-shadow: inset 0 1px 0 rgba(200,255,245,0.1), 0 20px 56px rgba(0,0,0,0.45); }
+    .contact-card:hover { transform: translateY(-5px); border-color: rgba(201,168,76,0.28); box-shadow: inset 0 1px 0 rgba(200,255,245,0.1), 0 20px 56px rgba(0,0,0,0.45); }
 
     .c-icon-wrap {
       width: 52px; height: 52px; border-radius: 16px; margin: 0 auto 20px;
-      background: rgba(100,210,200,0.09); border: 1px solid rgba(100,210,200,0.18);
+      background: rgba(201,168,76,0.09); border: 1px solid rgba(201,168,76,0.18);
       display: flex; align-items: center; justify-content: center;
     }
     .c-title { font-family: var(--font-serif); font-size: 1.05rem; color: var(--white); margin-bottom: 8px; }
@@ -507,7 +509,7 @@ const GlobalStyles = () => (
 
     /* ── Footer ── */
     .lp-footer {
-      border-top: 1px solid rgba(100,210,200,0.1);
+      border-top: 1px solid rgba(201,168,76,0.1);
       padding: 56px clamp(20px,5vw,72px) 32px;
       max-width: 100%;
     }
@@ -526,7 +528,7 @@ const GlobalStyles = () => (
       margin-bottom: 12px; transition: color 0.25s; font-weight: 300;
     }
     .footer-link:hover { color: var(--teal); }
-    .footer-bottom { max-width: 1200px; margin: 0 auto; border-top: 1px solid rgba(100,210,200,0.08); padding-top: 24px; text-align: center; }
+    .footer-bottom { max-width: 1200px; margin: 0 auto; border-top: 1px solid rgba(201,168,76,0.08); padding-top: 24px; text-align: center; }
     .footer-copy { font-size: 0.72rem; letter-spacing: 0.08em; color: var(--text-dim); }
 
     /* ── Mobile nav ── */
@@ -597,7 +599,7 @@ const FeatCard = ({ icon: Icon, title, desc, delay }) => {
   return (
     <div ref={ref} className="feat-card reveal">
       <div className="feat-card-glow" />
-      <div className="feat-icon"><Icon size={18} color="rgba(100,210,200,0.85)" /></div>
+      <div className="feat-icon"><Icon size={18} color="rgba(201,168,76,0.85)" /></div>
       <div className="feat-title">{title}</div>
       <div className="feat-desc">{desc}</div>
     </div>
@@ -628,7 +630,7 @@ const ContactCard = ({ icon: Icon, title, value, delay }) => {
   const ref = useInView(delay);
   return (
     <div ref={ref} className="contact-card reveal">
-      <div className="c-icon-wrap"><Icon size={20} color="rgba(100,210,200,0.8)" /></div>
+      <div className="c-icon-wrap"><Icon size={20} color="rgba(201,168,76,0.8)" /></div>
       <div className="c-title">{title}</div>
       <div className="c-val">{value}</div>
     </div>
@@ -725,7 +727,7 @@ const LandingPage = () => {
           >
             {[0,1,2].map(i => (
               <div key={i} style={{
-                width: 22, height: 1.5, background: 'rgba(100,210,200,0.7)',
+                width: 22, height: 1.5, background: 'rgba(201,168,76,0.7)',
                 marginBottom: i < 2 ? 5 : 0,
                 transition: 'all 0.3s',
                 transform: menuOpen && i===0 ? 'rotate(45deg) translate(4.5px,4.5px)' : menuOpen && i===2 ? 'rotate(-45deg) translate(4.5px,-4.5px)' : 'none',
@@ -807,7 +809,7 @@ const LandingPage = () => {
                       { icon: Download, label: 'Export',         sub: 'Any format' },
                     ].map(({ icon: Icon, label, sub }) => (
                       <div key={label} className="panel-item">
-                        <div className="pi-icon"><Icon size={15} color="rgba(100,210,200,0.8)" /></div>
+                        <div className="pi-icon"><Icon size={15} color="rgba(201,168,76,0.8)" /></div>
                         <div>
                           <div className="pi-title">{label}</div>
                           <div className="pi-sub">{sub}</div>
@@ -910,7 +912,7 @@ const LandingPage = () => {
           <div className="footer-inner">
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-                <img src="/logo.png" alt="Mimir" style={{ width: 32, height: 32, borderRadius: '50%', border: '1.5px solid rgba(100,210,200,0.3)' }} />
+                <img src="/logo.png" alt="Mimir" style={{ width: 32, height: 32, borderRadius: '50%', border: '1.5px solid rgba(201,168,76,0.3)' }} />
                 <span className="footer-brand-name">Mimir</span>
               </div>
               <p className="footer-p">

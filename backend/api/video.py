@@ -21,22 +21,20 @@ class ProcessingOptions(BaseModel):
     transcript: bool = True
     summary: bool = True
     subtitles: bool = True
-    keyframes: bool = False
-    rag: bool = False
+    keyframes: bool = True   # always on — keyframes are Phase 1 of the pipeline
+    rag: bool = True         # always on — RAG is the core indexing pipeline
     topic_based: bool = False
     topic: Optional[str] = None
     download_format: str = "srt"        # 'srt' | 'vtt' (user choice for download)
     summary_length: str = "medium"      # 'short' | 'medium' | 'long'
     use_gpu: bool = True
     video_id: Optional[str] = None
-    
+
     class Config:
         extra = "allow"  # Allow extra fields
-        
+
     def model_dump(self, **kwargs):
-        """Override model_dump method to handle None values properly"""
         data = super().model_dump(**kwargs)
-        # Ensure topic is included even if None
         if 'topic' not in data:
             data['topic'] = None
         return data
@@ -150,6 +148,16 @@ async def list_tasks():
     """List all tasks"""
     tasks = task_manager.get_all_tasks()
     return {"tasks": [task.to_dict() for task in tasks]}
+
+@router.get("/pipeline-logs/{task_id}")
+async def get_pipeline_logs(task_id: str):
+    """Return per-stage pipeline logs for the diagnostics page"""
+    task = task_manager.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    results = task.results or {}
+    logs = results.get("pipeline_logs", {})
+    return {"task_id": task_id, "logs": logs, "status": task.status}
 
 def _to_url_path(path: str) -> str:
     """Normalise a backend file path to a forward-slash URL path under /uploads."""

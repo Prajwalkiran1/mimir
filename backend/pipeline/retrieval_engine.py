@@ -183,11 +183,11 @@ class RetrievalEngine:
         
         return "general"
     
-    async def retrieve(self, 
-                      query: str, 
-                      top_k_graph: int = 10,
-                      top_k_vector: int = 10,
-                      top_k_final: int = 5,
+    async def retrieve(self,
+                      query: str,
+                      top_k_graph: int = 40,
+                      top_k_vector: int = 40,
+                      top_k_final: int = 30,
                       expand_temporal: bool = True) -> List[Dict[str, Any]]:
         """
         Perform retrieval with fork-join parallel search

@@ -7,6 +7,7 @@ import LandingPage from './pages/LandingPage';
 import VideoUpload from './pages/VideoUpload';
 import Profile from './pages/Profile';
 import RAGSearch from './pages/RAGSearch';
+import PipelineLogs from './pages/PipelineLogs';
 
 /**
  * Gate that pushes unauthenticated users to /login while remembering where
@@ -45,9 +46,10 @@ function App() {
           <Route path="/signup" element={<Signup />} />
 
           {/* Protected */}
-          <Route path="/upload"  element={<RequireAuth><VideoUpload /></RequireAuth>} />
-          <Route path="/search"  element={<RequireAuth><RAGSearch /></RequireAuth>} />
-          <Route path="/profile" element={<RequireAuth><Profile /></RequireAuth>} />
+          <Route path="/upload"       element={<RequireAuth><VideoUpload /></RequireAuth>} />
+          <Route path="/search"       element={<RequireAuth><RAGSearch /></RequireAuth>} />
+          <Route path="/profile"      element={<RequireAuth><Profile /></RequireAuth>} />
+          <Route path="/logs/:taskId" element={<RequireAuth><PipelineLogs /></RequireAuth>} />
 
           {/* Root → landing for everyone (auth check happens on /upload click) */}
           <Route path="/"        element={<Navigate to="/landing" replace />} />
