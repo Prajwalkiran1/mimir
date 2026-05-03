@@ -115,28 +115,37 @@ class PipelineOrchestrator:
             results: Dict[str, Any] = {}
             pipeline_logs: Dict[str, Any] = {}
 
-            # ── Phase 1: Transcription + Keyframe Extraction ──────────── #
+            # ── Phase 1: Transcription + Keyframe Extraction (parallel) ── #
             t0 = time.time()
 
-            if options.get("transcript", True) and self.transcription_engine:
-                if progress_callback:
-                    progress_callback("Transcribing audio (WhisperX)...", 10)
+            if progress_callback:
+                progress_callback("Transcribing + extracting keyframes (parallel)...", 10)
+
+            run_transcription = (
+                options.get("transcript", True) and self.transcription_engine is not None
+            )
+            run_keyframes = self.keyframe_extractor is not None
+
+            if run_transcription and run_keyframes:
+                # Both available — run concurrently (they use different resources)
+                transcript, keyframe_data = await asyncio.gather(
+                    self._run_transcription(video_path, progress_callback),
+                    self._run_keyframe_extraction(video_path, progress_callback, transcript=None),
+                )
+            elif run_transcription:
                 transcript = await self._run_transcription(video_path, progress_callback)
-                results["transcript"] = transcript
+                keyframe_data = {}
+            elif run_keyframes:
+                transcript = None
+                keyframe_data = await self._run_keyframe_extraction(
+                    video_path, progress_callback, transcript=None
+                )
             else:
                 transcript = None
-                results["transcript"] = None
-
-            if self.keyframe_extractor:
-                if progress_callback:
-                    progress_callback("Extracting and clustering video frames...", 25)
-                keyframe_data = await self._run_keyframe_extraction(
-                    video_path, progress_callback, transcript
-                )
-                results["keyframes"] = keyframe_data
-            else:
                 keyframe_data = {}
-                results["keyframes"] = None
+
+            results["transcript"] = transcript
+            results["keyframes"] = keyframe_data if keyframe_data else None
 
             phase1_time = time.time() - t0
             pipeline_logs["phase1"] = {
@@ -156,6 +165,10 @@ class PipelineOrchestrator:
                     progress_callback("Building semantic chunks...", 40)
                 t1 = time.time()
 
+                # Reset per-task state so uploads don't bleed into each other
+                self.vector_store.reset()
+                self.knowledge_graph.reset()
+
                 video_id = self._derive_video_id(video_path, options)
                 index_dir = os.path.join(config.upload_dir, video_id, "index")
                 chunks_dir = os.path.join(config.upload_dir, video_id, "chunks")
@@ -163,17 +176,28 @@ class PipelineOrchestrator:
                 semantic_chunks = self.semantic_chunker.chunk_transcript(
                     transcript or {}, video_id
                 )
-                self.semantic_chunker.save_chunks(semantic_chunks, chunks_dir, video_id)
+                try:
+                    self.semantic_chunker.save_chunks(semantic_chunks, chunks_dir, video_id)
+                except Exception as e:
+                    logger.warning(f"save_chunks failed (non-fatal): {e}")
 
                 if progress_callback:
                     progress_callback("Building knowledge graph (spaCy NER + SVO)...", 52)
                 kg = self.knowledge_graph.build_knowledge_graph(semantic_chunks, video_id)
-                self.knowledge_graph.save_graph(index_dir, video_id)
+                try:
+                    self.knowledge_graph.save_graph(index_dir, video_id)
+                except Exception as e:
+                    logger.warning(f"save_graph failed (non-fatal): {e}")
 
                 if progress_callback:
                     progress_callback("Building FAISS vector store...", 63)
-                self.vector_store.add_chunks(semantic_chunks)
-                self.vector_store.save(index_dir, video_id)
+                # Use pre-computed embeddings from SemanticChunker — avoids a second
+                # SentenceTransformer pass and eliminates the most common [Errno 22] path.
+                self.vector_store.add_chunks(semantic_chunks, compute_embeddings=False)
+                try:
+                    self.vector_store.save(index_dir, video_id)
+                except Exception as e:
+                    logger.warning(f"vector_store.save failed (non-fatal): {e}")
 
                 self.retrieval_engine.initialize(
                     self.knowledge_graph, self.vector_store, semantic_chunks
@@ -182,9 +206,12 @@ class PipelineOrchestrator:
                 # KG sample edges for visualisation
                 kg_sample_edges: List[Dict] = []
                 if self.knowledge_graph.graph:
-                    for src, dst, data in list(
-                        self.knowledge_graph.graph.edges(data=True)
-                    )[:50]:
+                    sorted_edges = sorted(
+                        self.knowledge_graph.graph.edges(data=True),
+                        key=lambda e: e[2].get("weight", 1),
+                        reverse=True,
+                    )[:40]
+                    for src, dst, data in sorted_edges:
                         kg_sample_edges.append(
                             {
                                 "source": str(src),
@@ -194,6 +221,7 @@ class PipelineOrchestrator:
                                     if data.get("predicates")
                                     else ""
                                 ),
+                                "weight": data.get("weight", 1),
                             }
                         )
 
@@ -223,7 +251,7 @@ class PipelineOrchestrator:
 
                 # ── Phase 3: Hybrid retrieval + Summarization ─────────── #
                 if progress_callback:
-                    progress_callback("Hybrid retrieval → General summary...", 70)
+                    progress_callback("Hybrid retrieval -> General summary...", 70)
                 t2 = time.time()
 
                 summary_length = options.get("summary_length", "medium")
@@ -238,7 +266,7 @@ class PipelineOrchestrator:
                 topic = options.get("topic") or None
                 if topic:
                     if progress_callback:
-                        progress_callback(f"Hybrid retrieval → Topic summary: {topic[:30]}...", 80)
+                        progress_callback(f"Hybrid retrieval -> Topic summary: {topic[:30]}...", 80)
                     topic_summary = await self._run_summarization_via_retrieval(
                         self.retrieval_engine,
                         topic=topic,
@@ -250,17 +278,36 @@ class PipelineOrchestrator:
                     results["topic_summary"] = None
 
                 phase3_time = time.time() - t2
+                # Dual-channel coverage stats per channel
+                gen_scores = general_summary.get("retrieval_scores", [])
+                gen_graph_hits = sum(1 for s in gen_scores if s.get("graph_score", 0) > 0)
+                gen_vector_hits = sum(1 for s in gen_scores if s.get("vector_score", 0) > 0)
+                gen_both_hits = sum(
+                    1 for s in gen_scores
+                    if s.get("graph_score", 0) > 0 and s.get("vector_score", 0) > 0
+                )
+                topic_scores = (
+                    results["topic_summary"].get("retrieval_scores", [])
+                    if results["topic_summary"] else []
+                )
+                topic_graph_hits = sum(1 for s in topic_scores if s.get("graph_score", 0) > 0)
+                topic_vector_hits = sum(1 for s in topic_scores if s.get("vector_score", 0) > 0)
+
                 pipeline_logs["phase3"] = {
                     "general_query": "summarize main topics, key insights, and important content",
                     "general_retrieved_count": general_summary.get("retrieved_chunk_count", 0),
-                    "general_retrieval_scores": general_summary.get("retrieval_scores", []),
+                    "general_graph_hits": gen_graph_hits,
+                    "general_vector_hits": gen_vector_hits,
+                    "general_both_hits": gen_both_hits,
+                    "general_retrieval_scores": gen_scores,
                     "general_retrieved_chunks": general_summary.get("retrieved_chunks", []),
                     "topic": topic,
                     "topic_retrieved_count": (
                         results["topic_summary"].get("retrieved_chunk_count", 0)
-                        if results["topic_summary"]
-                        else 0
+                        if results["topic_summary"] else 0
                     ),
+                    "topic_graph_hits": topic_graph_hits,
+                    "topic_vector_hits": topic_vector_hits,
                     "timing_sec": round(phase3_time, 2),
                 }
 
@@ -311,9 +358,13 @@ class PipelineOrchestrator:
         video_path: str,
         progress_callback: Optional[Callable] = None,
     ) -> Dict[str, Any]:
+        # transcribe_video is sync (CPU/GPU bound). Run in a worker thread so it doesn't
+        # block the event loop AND can run concurrently with keyframe extraction.
         try:
-            return await self.transcription_engine.transcribe_video(
-                video_path, progress_callback
+            return await asyncio.to_thread(
+                self.transcription_engine.transcribe_video,
+                video_path,
+                progress_callback,
             )
         except TranscriptionError as e:
             logger.error(f"Transcription failed: {e}")
@@ -326,8 +377,11 @@ class PipelineOrchestrator:
         transcript: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         try:
-            return await self.keyframe_extractor.extract_keyframes(
-                video_path, progress_callback, transcript
+            return await asyncio.to_thread(
+                self.keyframe_extractor.extract_keyframes,
+                video_path,
+                progress_callback,
+                transcript,
             )
         except KeyframeExtractionError as e:
             logger.error(f"Keyframe extraction failed: {e}")
@@ -340,9 +394,13 @@ class PipelineOrchestrator:
         progress_callback: Optional[Callable] = None,
     ) -> Dict[str, Any]:
         try:
-            return await self.subtitle_generator.generate_subtitles(
+            gen = self.subtitle_generator.generate_subtitles(
                 transcript, format_type, progress_callback
             )
+            # Support both sync and async subtitle generators
+            if asyncio.iscoroutine(gen):
+                return await gen
+            return gen
         except SubtitleError as e:
             logger.error(f"Subtitle generation failed: {e}")
             raise
@@ -365,8 +423,13 @@ class PipelineOrchestrator:
             else "summarize the main topics, key insights, and important content"
         )
 
+        is_topic_query = bool(topic)
         try:
-            retrieved_chunks = await retrieval_engine.retrieve(query, top_k_final=30)
+            retrieved_chunks = await retrieval_engine.retrieve(
+                query,
+                top_k_final=15 if is_topic_query else 30,
+                topic_mode=is_topic_query,
+            )
         except Exception as e:
             logger.warning(f"Retrieval failed ({e}); using empty context")
             retrieved_chunks = []
@@ -385,11 +448,25 @@ class PipelineOrchestrator:
             filler_re.sub("", c["text"]).strip() for c in sorted_chunks
         )
 
+        # Dual-channel diagnostics — confirm BOTH KG and vector contributed signal.
+        n_graph = sum(1 for c in sorted_chunks if c.get("graph_score", 0) > 0)
+        n_vector = sum(1 for c in sorted_chunks if c.get("vector_score", 0) > 0)
+        n_both = sum(
+            1 for c in sorted_chunks
+            if c.get("graph_score", 0) > 0 and c.get("vector_score", 0) > 0
+        )
         logger.info(
             f"Sending {len(sorted_chunks)} retrieved chunks "
             f"({len(context_text.split())} words) to Gemini for "
-            f"{'topic: ' + topic if topic else 'general'} summary"
+            f"{'topic: ' + topic if topic else 'general'} summary | "
+            f"dual-channel coverage: graph={n_graph}, vector={n_vector}, "
+            f"both={n_both} of {len(sorted_chunks)}"
         )
+        if len(sorted_chunks) > 0 and n_graph == 0:
+            logger.warning(
+                "Knowledge graph contributed ZERO chunks to the LLM context — "
+                "dual-channel constraint degraded to vector-only."
+            )
 
         try:
             result = await self._summarize_with_gemini(context_text, topic, summary_length)
@@ -451,9 +528,14 @@ class PipelineOrchestrator:
         model = genai.GenerativeModel("gemini-2.5-flash-lite")
 
         profile = self.LENGTH_PROFILES.get(summary_length, self.LENGTH_PROFILES["medium"])
-        topic_hint = (
-            f"Topic focus: {topic}" if topic else "No specific topic — summarize the full content."
-        )
+        if topic:
+            topic_hint = (
+                f'IMPORTANT: Summarize ONLY the content related to: "{topic}". '
+                f'Do NOT write a general summary. Focus exclusively on what the video says about "{topic}". '
+                f"Ignore content that is not directly about this topic."
+            )
+        else:
+            topic_hint = "Summarize the full content broadly, covering all main themes."
         text_slice = transcript_text[:14000]
         bullets_template = "\n".join(
             f"- <key point {i+1}>" for i in range(profile["kp_count"])
@@ -474,7 +556,7 @@ SUMMARY:
 KEY POINTS ({profile["kp_label"]}):
 {bullets_template}"""
 
-        response = model.generate_content(prompt)
+        response = await asyncio.to_thread(model.generate_content, prompt)
         raw = response.text.strip()
 
         summary = ""
