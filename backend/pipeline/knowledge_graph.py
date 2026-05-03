@@ -42,81 +42,104 @@ class KnowledgeGraph:
             logger.error(f"Failed to load spaCy model: {e}")
             raise
     
-    def build_knowledge_graph(self, 
-                             chunks: List[Dict[str, Any]], 
+    def build_knowledge_graph(self,
+                             chunks: List[Dict[str, Any]],
                              video_id: str,
                              progress_callback: Optional[callable] = None) -> nx.DiGraph:
         """
-        Build knowledge graph from transcript chunks
-        
-        Args:
-            chunks: List of transcript chunks
-            video_id: Video identifier
-            progress_callback: Progress callback function
-            
-        Returns:
-            NetworkX directed graph
+        Build knowledge graph from transcript chunks using batched spaCy pipe.
         """
         if not self.nlp:
             self.initialize()
-            
+
         if progress_callback:
             progress_callback("Initializing knowledge graph...", 10)
-        
-        # Create directed graph
+
         self.graph = nx.DiGraph(video_id=video_id)
-        
+
         if progress_callback:
-            progress_callback("Extracting entities and relations...", 30)
-        
-        # Extract entities and relations from all chunks
-        all_entities = []
-        all_relations = []
-        
-        for i, chunk in enumerate(chunks):
-            if progress_callback and i % 10 == 0:
-                progress_callback(f"Processing chunk {i+1}/{len(chunks)}...", 30 + (i * 40 // len(chunks)))
-            
-            entities, relations = self._extract_entities_and_relations(chunk)
+            progress_callback("Extracting entities and relations (batched)...", 30)
+
+        # Batch process all chunk texts in a single pipe pass — much faster than
+        # calling self.nlp(text) per chunk (avoids Python overhead per call).
+        texts = [c["text"] for c in chunks]
+        all_entities: List[Dict[str, Any]] = []
+        all_relations: List[Dict[str, Any]] = []
+
+        n = max(1, len(chunks))
+        for i, (chunk, doc) in enumerate(
+            zip(chunks, self.nlp.pipe(texts, batch_size=16))
+        ):
+            if progress_callback and i % 20 == 0:
+                progress_callback(
+                    f"NLP {i+1}/{n}", 30 + (i * 40 // n)
+                )
+            entities, relations = self._extract_from_doc(doc, chunk)
             all_entities.extend(entities)
             all_relations.extend(relations)
-        
+
         if progress_callback:
-            progress_callback("Building graph structure...", 70)
-        
-        # Add nodes and edges to graph
+            progress_callback("Building graph structure...", 75)
+
         self._add_entities_to_graph(all_entities)
         self._add_relations_to_graph(all_relations)
-        
+        self._add_cooccurrence_edges(all_entities)
+
         if progress_callback:
-            progress_callback("Computing graph analytics...", 90)
-        
-        # Compute graph metrics
+            progress_callback("Computing graph analytics...", 92)
+
+        # Cheap metrics only (degree centrality is O(V+E)). Skip betweenness/closeness:
+        # both are O(V*E) and weren't actually consumed by retrieval.
         self._compute_graph_metrics()
-        
+
         if progress_callback:
-            progress_callback(f"Knowledge graph complete: {self.graph.number_of_nodes()} nodes, {self.graph.number_of_edges()} edges", 100)
-        
+            progress_callback(
+                f"KG complete: {self.graph.number_of_nodes()} nodes, "
+                f"{self.graph.number_of_edges()} edges",
+                100,
+            )
+
         return self.graph
-    
-    def _extract_entities_and_relations(self, chunk: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-        """Extract entities and relations from a chunk"""
-        doc = self.nlp(chunk["text"])
-        entities = []
-        relations = []
+
+    # Pronouns / determiners that should never become standalone graph entities
+    _STOP_NOUN_CHUNKS = frozenset({
+        "i", "you", "we", "they", "it", "he", "she", "this", "that",
+        "these", "those", "what", "which", "who", "whom", "us", "them",
+        "me", "him", "her", "myself", "yourself", "themselves", "everyone",
+        "someone", "anything", "everything", "something", "nothing",
+        "one", "ones", "thing", "things", "way", "ways", "kind", "kinds",
+    })
+
+    def _extract_from_doc(self, doc, chunk: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """Extract entities + relations from an already-parsed spaCy doc."""
+        entities: List[Dict[str, Any]] = []
+        relations: List[Dict[str, Any]] = []
         
         # Extract entities
-        # 1. Noun phrases as concepts
+        # 1. Noun phrases as concepts (filter pronouns / determiners / single short words)
         for noun_chunk in doc.noun_chunks:
-            if len(noun_chunk.text.split()) <= 4:  # Filter out very long phrases
-                entities.append({
-                    "text": noun_chunk.text.lower().strip(),
-                    "label": "CONCEPT",
-                    "chunk_id": chunk["chunk_id"],
-                    "time_start": chunk["time_start"],
-                    "time_end": chunk["time_end"],
-                    "confidence": self._compute_entity_confidence(noun_chunk)
-                })
+            text = noun_chunk.text.lower().strip()
+            words = text.split()
+            if not text or len(words) > 4 or len(text) < 3:
+                continue
+            if text in self._STOP_NOUN_CHUNKS:
+                continue
+            # Skip if the head is a pronoun
+            if noun_chunk.root.pos_ in {"PRON", "DET"}:
+                continue
+            # Strip determiner if present (e.g. "the dataframe" → "dataframe")
+            if words[0] in {"a", "an", "the", "this", "that", "these", "those", "my", "your", "his", "her", "its", "our", "their"}:
+                text = " ".join(words[1:]).strip()
+                if not text or len(text) < 3 or text in self._STOP_NOUN_CHUNKS:
+                    continue
+            entities.append({
+                "text": text,
+                "label": "CONCEPT",
+                "chunk_id": chunk["chunk_id"],
+                "time_start": chunk["time_start"],
+                "time_end": chunk["time_end"],
+                "confidence": self._compute_entity_confidence(noun_chunk),
+            })
         
         # 2. Named entities
         for ent in doc.ents:
@@ -262,36 +285,57 @@ class KnowledgeGraph:
                     relation_type="semantic"
                 )
     
+    def reset(self):
+        """Clear the graph so the next task starts with a clean slate."""
+        self.graph = None
+
+    def _add_cooccurrence_edges(self, entities: List[Dict[str, Any]]):
+        """Add co-occurrence edges between entities that appear in the same chunk."""
+        chunk_entity_map: Dict[str, List[str]] = defaultdict(list)
+        for entity in entities:
+            chunk_entity_map[entity["chunk_id"]].append(entity["text"])
+
+        for chunk_id, entity_list in chunk_entity_map.items():
+            seen = list(dict.fromkeys(entity_list))  # deduplicate, preserve order
+            for i, ent_a in enumerate(seen):
+                for ent_b in seen[i + 1:]:
+                    if not self.graph.has_edge(ent_a, ent_b):
+                        self.graph.add_edge(
+                            ent_a, ent_b,
+                            predicates=["co-occurs"],
+                            chunk_ids={chunk_id},
+                            time_start=0,
+                            time_end=0,
+                            confidence=0.5,
+                            relation_type="co-occurrence",
+                            weight=1,
+                        )
+                    else:
+                        self.graph[ent_a][ent_b].get("chunk_ids", set()).add(chunk_id)
+                        self.graph[ent_a][ent_b]["weight"] = (
+                            self.graph[ent_a][ent_b].get("weight", 1) + 1
+                        )
+
     def _compute_graph_metrics(self):
-        """Compute graph analytics and metrics"""
+        """Compute cheap graph analytics. Heavy O(V*E) metrics intentionally skipped:
+        retrieval doesn't consume them and on a 100-node graph they cost ~seconds.
+        """
         if not self.graph:
             return
-        
-        # Compute centrality measures
+
+        # Degree centrality is O(V+E)
         try:
             degree_centrality = nx.degree_centrality(self.graph)
-            betweenness_centrality = nx.betweenness_centrality(self.graph)
-            closeness_centrality = nx.closeness_centrality(self.graph)
-            
-            # Add metrics to nodes
             for node in self.graph.nodes():
-                node_data = self.graph.nodes[node]
-                node_data["degree_centrality"] = degree_centrality.get(node, 0.0)
-                node_data["betweenness_centrality"] = betweenness_centrality.get(node, 0.0)
-                node_data["closeness_centrality"] = closeness_centrality.get(node, 0.0)
+                self.graph.nodes[node]["degree_centrality"] = degree_centrality.get(node, 0.0)
         except Exception as e:
-            logger.warning(f"Failed to compute graph metrics: {e}")
-        
-        # Compute graph-level statistics
+            logger.warning(f"Failed to compute degree centrality: {e}")
+
+        # Density is cheap; skip clustering coefficient (requires undirected conversion + N(v) iteration)
         try:
-            density = nx.density(self.graph)
-            clustering = nx.average_clustering(self.graph.to_undirected())
-            
-            self.graph.graph["density"] = density
-            self.graph.graph["clustering_coefficient"] = clustering
-            self.graph.graph["num_connected_components"] = nx.number_connected_components(self.graph.to_undirected())
+            self.graph.graph["density"] = nx.density(self.graph)
         except Exception as e:
-            logger.warning(f"Failed to compute graph statistics: {e}")
+            logger.warning(f"Failed to compute graph density: {e}")
     
     def search_entities(self, query: str, top_k: int = 10) -> List[Dict[str, Any]]:
         """Search for entities matching the query"""
@@ -304,14 +348,11 @@ class KnowledgeGraph:
         for node in self.graph.nodes():
             node_data = self.graph.nodes[node]
             
-            # Check if query matches node text or labels
+            # Bidirectional substring match (matches notebook formula)
+            node_lower = node.lower()
             match_score = 0.0
-            if query_lower in node.lower():
+            if query_lower in node_lower or node_lower in query_lower:
                 match_score = 1.0
-            elif any(query_lower in label.lower() for label in node_data.get("label", "").split()):
-                match_score = 0.8
-            elif node_data.get("entity_type", "").lower() in query_lower:
-                match_score = 0.6
             
             if match_score > 0:
                 results.append({
@@ -324,8 +365,8 @@ class KnowledgeGraph:
                     "chunk_ids": list(node_data.get("chunk_ids", set()))
                 })
         
-        # Sort by combined score
-        results.sort(key=lambda x: x["match_score"] * x["confidence"], reverse=True)
+        # Sort by mention count so high-frequency entities surface first
+        results.sort(key=lambda x: len(x["mentions"]), reverse=True)
         return results[:top_k]
     
     def get_related_entities(self, entity: str, relation_type: Optional[str] = None, top_k: int = 10) -> List[Dict[str, Any]]:
@@ -402,36 +443,42 @@ class KnowledgeGraph:
         }
     
     def save_graph(self, output_dir: str, video_id: str):
-        """Save knowledge graph to disk"""
+        """Save knowledge graph to disk."""
         os.makedirs(output_dir, exist_ok=True)
-        
-        # Save as pickle
+
         kg_path = os.path.join(output_dir, f"{video_id}_knowledge_graph.pkl")
         with open(kg_path, "wb") as f:
             pickle.dump(self.graph, f)
-        
-        # Save human-readable edge list
-        kg_json_path = os.path.join(output_dir, f"{video_id}_kg_edges.json")
-        edges_data = []
-        for src, dst in self.graph.edges():
-            edge_data = self.graph[src][dst]
-            edges_data.append({
-                "source": src,
-                "target": dst,
-                "predicates": edge_data.get("predicates", []),
-                "confidence": edge_data.get("confidence", 0.0),
-                "chunk_ids": list(edge_data.get("chunk_ids", set()))
-            })
-        
-        with open(kg_json_path, "w") as f:
-            json.dump(edges_data[:200], f, indent=2)  # Sample for inspection
-        
-        # Save graph summary
-        summary_path = os.path.join(output_dir, f"{video_id}_kg_summary.json")
-        with open(summary_path, "w") as f:
-            json.dump(self.get_graph_summary(), f, indent=2)
-        
-        logger.info(f"Saved knowledge graph to {kg_path}")
+
+        # Edge list and summary are diagnostic-only — failures are non-fatal
+        try:
+            edges_data = []
+            for src, dst in self.graph.edges():
+                ed = self.graph[src][dst]
+                edges_data.append({
+                    "source": str(src),
+                    "target": str(dst),
+                    "predicates": list(ed.get("predicates", [])),
+                    "confidence": float(ed.get("confidence", 0.0)),
+                    "chunk_ids": list(ed.get("chunk_ids", set())),
+                })
+            kg_json_path = os.path.join(output_dir, f"{video_id}_kg_edges.json")
+            with open(kg_json_path, "w", encoding="utf-8") as f:
+                json.dump(edges_data[:200], f, indent=2)
+        except Exception as e:
+            logger.warning(f"KG edge-list save failed (non-fatal): {e}")
+
+        try:
+            summary = self.get_graph_summary()
+            # Ensure top_entities tuples are lists (JSON-safe)
+            summary["top_entities"] = [list(t) for t in summary.get("top_entities", [])]
+            summary_path = os.path.join(output_dir, f"{video_id}_kg_summary.json")
+            with open(summary_path, "w", encoding="utf-8") as f:
+                json.dump(summary, f, indent=2)
+        except Exception as e:
+            logger.warning(f"KG summary save failed (non-fatal): {e}")
+
+        logger.info(f"Saved knowledge graph → {kg_path}")
         return kg_path
     
     @classmethod
