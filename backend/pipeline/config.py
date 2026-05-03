@@ -13,7 +13,7 @@ class PipelineConfig(BaseSettings):
     cuda_visible_devices: str = "0"
     
     # Model Configuration
-    whisper_model: str = "base"
+    whisper_model: str = "tiny"
     transformers_cache_dir: str = "models"
     spacy_model: str = "en_core_web_sm"
     
@@ -25,7 +25,7 @@ class PipelineConfig(BaseSettings):
     # API Configuration
     api_host: str = "0.0.0.0"
     api_port: int = 8000
-    cors_origins: str = "http://localhost:5173,http://localhost:3000"
+    cors_origins: str = "http://localhost:5173,http://localhost:5174,http://localhost:3000"
     
     # Storage Configuration
     upload_dir: str = "uploads"

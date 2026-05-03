@@ -11,6 +11,18 @@ from pipeline.config import config
 
 logger = logging.getLogger(__name__)
 
+
+def _parse_dt(value: str) -> datetime:
+    """Parse datetime from either isoformat (T separator) or SQLite CURRENT_TIMESTAMP (space separator)."""
+    if not value:
+        return datetime.now()
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        # SQLite CURRENT_TIMESTAMP format: "2025-02-10 14:23:45"
+        return datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+
+
 class TaskStatus(Enum):
     """Task status enumeration"""
     QUEUED = "queued"
@@ -134,11 +146,11 @@ class TaskManager:
             task.status = TaskStatus(status)
             task.progress = progress
             task.current_step = error_message or "Processing..."
-            task.created_at = datetime.fromisoformat(created_at)
-            task.updated_at = datetime.fromisoformat(updated_at)
-            
+            task.created_at = _parse_dt(created_at)
+            task.updated_at = _parse_dt(updated_at)
+
             if completed_at:
-                task.completed_at = datetime.fromisoformat(completed_at)
+                task.completed_at = _parse_dt(completed_at)
             
             if results:
                 task.results = json.loads(results)
