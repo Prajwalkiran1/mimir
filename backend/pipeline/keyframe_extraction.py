@@ -16,6 +16,7 @@ from typing import Dict, Any, List, Optional, Tuple
 
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import normalize
+from scipy.signal import medfilt
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ class KeyframeExtractor:
     def __init__(self, **kwargs):
         pass
 
-    async def extract_keyframes(
+    def extract_keyframes(
         self,
         video_path: str,
         progress_callback: Optional[callable] = None,
@@ -195,7 +196,9 @@ class KeyframeExtractor:
 
         kmeans = KMeans(n_clusters=k, init="k-means++", n_init=3, random_state=42)
         labels = kmeans.fit_predict(features)
-        return labels, k
+        # Smooth label sequence to eliminate single-frame cluster flickers
+        smooth_labels = medfilt(labels.astype(float), kernel_size=5).astype(int)
+        return smooth_labels, k
 
     # ------------------------------------------------------------------ #
     # Step 3: scene segmentation from contiguous cluster-label runs       #
@@ -289,6 +292,12 @@ class KeyframeExtractor:
                     "cluster_id": scene["cluster_id"],
                     "small_rgb": frames_data[idx]["small_rgb"],
                 })
+
+        # Hard cap: ~3 keyframes/minute, minimum 10
+        if frames_data:
+            duration_min = (frames_data[-1]["timestamp"] + 1) / 60.0
+            max_kf = max(10, int(duration_min * 3))
+            selected = selected[:max_kf]
 
         # Re-open video once, seek to each selected frame, write JPEG
         cap = cv2.VideoCapture(video_path)

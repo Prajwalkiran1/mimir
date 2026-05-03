@@ -31,7 +31,7 @@ class TranscriptionEngine:
         self.device = device
         self.model = None
         
-    async def transcribe_video(self, video_path: str, progress_callback: Optional[callable] = None) -> Dict[str, Any]:
+    def transcribe_video(self, video_path: str, progress_callback: Optional[callable] = None) -> Dict[str, Any]:
         """
         Transcribe video file using Whisper
         
@@ -106,7 +106,7 @@ class TranscriptionEngine:
                 progress_callback("Processing speech recognition...", 45)
             
             # Transcribe audio using faster-whisper
-            segments_iter, info = self.model.transcribe(audio_path, beam_size=5)
+            segments_iter, info = self.model.transcribe(audio_path, beam_size=1, vad_filter=True)
 
             if progress_callback:
                 progress_callback("Formatting transcription results...", 55)
