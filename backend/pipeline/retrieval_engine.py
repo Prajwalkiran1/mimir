@@ -188,7 +188,8 @@ class RetrievalEngine:
                       top_k_graph: int = 40,
                       top_k_vector: int = 40,
                       top_k_final: int = 30,
-                      expand_temporal: bool = True) -> List[Dict[str, Any]]:
+                      expand_temporal: bool = True,
+                      topic_mode: bool = False) -> List[Dict[str, Any]]:
         """
         Perform retrieval with fork-join parallel search
         
@@ -210,7 +211,7 @@ class RetrievalEngine:
         logger.info(f"Query decomposed: {len(decomposed_query['entity_terms'])} entities, {len(decomposed_query['keywords'])} keywords")
         
         # Fork-join parallel search
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         
         # Create parallel tasks
         graph_task = loop.run_in_executor(
@@ -227,53 +228,78 @@ class RetrievalEngine:
         
         # Fuse and re-rank results
         fused_results = self._fuse_and_rerank(
-            graph_results, vector_results, decomposed_query, top_k_final
+            graph_results, vector_results, decomposed_query, top_k_final, topic_mode
         )
         
         logger.info(f"Final retrieval: {len(fused_results)} results")
         return fused_results
     
     def _graph_search(self, decomposed_query: Dict[str, Any], k: int) -> List[Dict[str, Any]]:
-        """Perform graph-based search using knowledge graph"""
-        entity_terms = decomposed_query["entity_terms"]
-        
-        if not entity_terms or not self.knowledge_graph.graph:
+        """Graph-based search.
+
+        Two paths:
+        - Topic / specific query: the entity_terms (from query decomposition) are matched
+          against KG nodes; chunks of matched nodes accumulate score = match * mention_count.
+        - General query (no terms match any KG node): fall back to the top-N highest-mention
+          KG entities so the graph channel still contributes signal. Without this fallback,
+          generic queries like "summarize the main topics" yield zero graph hits and the
+          dual-channel constraint silently degrades to vector-only.
+        """
+        if not self.knowledge_graph or not self.knowledge_graph.graph:
             return []
-        
-        chunk_scores = {}
-        
-        # Search for entities in the knowledge graph
+
+        entity_terms = list(decomposed_query.get("entity_terms") or [])
+        chunk_scores: Dict[str, float] = {}
+        matched_any = False
+
         for term in entity_terms:
-            # Find matching entities
             matching_entities = self.knowledge_graph.search_entities(term, top_k=20)
-            
+            if matching_entities:
+                matched_any = True
             for entity_info in matching_entities:
-                entity = entity_info["entity"]
                 match_score = entity_info["match_score"]
-                
-                # Get related chunks
-                chunk_ids = entity_info["chunk_ids"]
-                for chunk_id in chunk_ids:
-                    # Score based on entity importance and match
-                    entity_score = match_score * entity_info["confidence"]
-                    
-                    # Boost score based on graph centrality
-                    centrality_boost = entity_info.get("degree_centrality", 0.0) * 0.1
-                    
-                    total_score = entity_score + centrality_boost
+                mention_count = max(len(entity_info.get("mentions", [])), 1)
+                total_score = match_score * mention_count
+                for chunk_id in entity_info["chunk_ids"]:
                     chunk_scores[chunk_id] = chunk_scores.get(chunk_id, 0.0) + total_score
-        
-        # Convert scores to chunk objects
+
+        if not matched_any:
+            top_entities = self._top_kg_entities_by_mentions(top_n=50)
+            logger.info(
+                f"Graph search: no query-term matches; falling back to top {len(top_entities)} "
+                f"KG entities by mention count"
+            )
+            for node, mention_count in top_entities:
+                ent_data = self.knowledge_graph.graph.nodes[node]
+                for chunk_id in ent_data.get("chunk_ids", set()):
+                    chunk_scores[chunk_id] = chunk_scores.get(chunk_id, 0.0) + mention_count
+
         chunk_lookup = {chunk["chunk_id"]: chunk for chunk in self.semantic_chunks}
-        results = []
-        
+        results: List[Dict[str, Any]] = []
         for chunk_id, score in sorted(chunk_scores.items(), key=lambda x: x[1], reverse=True)[:k]:
             if chunk_id in chunk_lookup:
                 chunk = chunk_lookup[chunk_id].copy()
                 chunk["graph_score"] = float(score)
                 results.append(chunk)
-        
+
         return results
+
+    def _top_kg_entities_by_mentions(self, top_n: int = 25) -> List[Tuple[str, int]]:
+        """Return [(node_id, mention_count), ...] sorted by mention count desc."""
+        if not self.knowledge_graph or not self.knowledge_graph.graph:
+            return []
+        scored = []
+        for node in self.knowledge_graph.graph.nodes():
+            data = self.knowledge_graph.graph.nodes[node]
+            mc = len(data.get("mentions", []))
+            if mc <= 0:
+                continue
+            # Skip degenerate single-token / pronoun-like nodes
+            if len(node) < 3 or node in {"i", "you", "we", "they", "it", "he", "she", "this", "that"}:
+                continue
+            scored.append((node, mc))
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored[:top_n]
     
     def _vector_search(self, 
                       decomposed_query: Dict[str, Any], 
@@ -294,11 +320,12 @@ class RetrievalEngine:
         
         return results
     
-    def _fuse_and_rerank(self, 
+    def _fuse_and_rerank(self,
                         graph_results: List[Dict[str, Any]],
                         vector_results: List[Dict[str, Any]],
                         decomposed_query: Dict[str, Any],
-                        k: int) -> List[Dict[str, Any]]:
+                        k: int,
+                        topic_mode: bool = False) -> List[Dict[str, Any]]:
         """
         Fuse results from both channels and re-rank
         
@@ -311,47 +338,58 @@ class RetrievalEngine:
         Returns:
             Re-ranked fused results
         """
-        # Deduplicate by chunk_id
-        seen_chunks = set()
-        merged_results = []
-        
+        # Merge by chunk_id, preserving BOTH vector_score and graph_score per chunk.
+        # Earlier code dropped the second occurrence, silently losing one channel's signal
+        # for any chunk surfaced by both retrievers — exactly the chunks we trust most.
+        merged_map: Dict[str, Dict[str, Any]] = {}
         for result in graph_results + vector_results:
-            chunk_id = result.get("chunk_id", "")
-            if chunk_id and chunk_id not in seen_chunks:
-                seen_chunks.add(chunk_id)
-                merged_results.append(result)
-        
-        # Compute text overlap scores
+            cid = result.get("chunk_id", "")
+            if not cid:
+                continue
+            if cid not in merged_map:
+                merged_map[cid] = result.copy()
+            else:
+                existing = merged_map[cid]
+                for key in ("vector_score", "graph_score"):
+                    if key in result and result[key] > existing.get(key, 0.0):
+                        existing[key] = result[key]
+        merged_results: List[Dict[str, Any]] = list(merged_map.values())
+
+        # Text overlap (TF-IDF over chunk text vs query terms)
         text_overlap_scores = self._compute_text_overlap_scores(merged_results, decomposed_query)
-        
-        # Compute final scores
+
+        # Topic mode boosts graph weight (graph does targeted entity lookup well)
+        weights = (
+            {"vector": 0.35, "graph": 0.50, "text_overlap": 0.15}
+            if topic_mode
+            else self.fusion_weights
+        )
+
+        # Normalize graph scores against the max in this batch — keeps the graph channel
+        # meaningfully contributing regardless of absolute mention counts.
+        max_graph_raw = max((r.get("graph_score", 0.0) for r in merged_results), default=0.0)
+        graph_norm_denom = max_graph_raw if max_graph_raw > 0 else 1.0
+
         for result in merged_results:
-            vector_score = result.get("vector_score", 0.0)
-            graph_score = result.get("graph_score", 0.0)
-            text_overlap = text_overlap_scores.get(result["chunk_id"], 0.0)
-            
-            # Normalize scores
-            vector_score = min(vector_score, 1.0)
-            graph_score = min(graph_score / 10.0, 1.0)  # Graph scores can be higher
-            text_overlap = min(text_overlap, 1.0)
-            
-            # Weighted fusion
+            vector_score = min(max(result.get("vector_score", 0.0), 0.0), 1.0)
+            graph_raw = result.get("graph_score", 0.0)
+            graph_score = max(graph_raw / graph_norm_denom, 0.0)
+            text_overlap = min(max(text_overlap_scores.get(result["chunk_id"], 0.0), 0.0), 1.0)
+
             final_score = (
-                self.fusion_weights["vector"] * vector_score +
-                self.fusion_weights["graph"] * graph_score +
-                self.fusion_weights["text_overlap"] * text_overlap
+                weights["vector"] * vector_score
+                + weights["graph"] * graph_score
+                + weights["text_overlap"] * text_overlap
             )
-            
+
             result["final_score"] = round(final_score, 4)
+            result["graph_score"] = round(graph_score, 4)
+            result["vector_score"] = round(vector_score, 4)
             result["text_overlap_score"] = round(text_overlap, 4)
-            
-            # Add ranking information
             result["vector_rank"] = 1.0 if vector_score > 0 else 0.0
             result["graph_rank"] = 1.0 if graph_score > 0 else 0.0
-        
-        # Sort by final score
+
         merged_results.sort(key=lambda x: x["final_score"], reverse=True)
-        
         return merged_results[:k]
     
     def _compute_text_overlap_scores(self, 

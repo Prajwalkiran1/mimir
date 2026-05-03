@@ -9,7 +9,6 @@ Follows the notebook (cumrag-latest) Phase 2.1-2.2 exactly:
 """
 
 import logging
-import re
 import json
 import os
 import numpy as np
@@ -18,8 +17,9 @@ from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
 
-SIM_THRESHOLD = 0.75      # cosine drop below this → start new chunk
-MAX_CHUNK_TOKENS = 400    # hard token ceiling per chunk
+SIM_THRESHOLD = 0.55      # cosine drop below this → start new chunk
+MAX_CHUNK_TOKENS = 350    # hard token ceiling per chunk
+MIN_CHUNK_TOKENS = 60     # don't finalize a chunk smaller than this — produces topical chunks
 
 
 class SemanticChunker:
@@ -31,8 +31,13 @@ class SemanticChunker:
         self.model: Optional[SentenceTransformer] = None
 
     def initialize(self):
-        self.model = SentenceTransformer(self.model_name)
-        logger.info(f"Loaded SentenceTransformer: {self.model_name}")
+        try:
+            import torch
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        except Exception:
+            device = "cpu"
+        self.model = SentenceTransformer(self.model_name, device=device)
+        logger.info(f"Loaded SentenceTransformer: {self.model_name} on {device}")
 
     def chunk_transcript(
         self,
@@ -56,7 +61,10 @@ class SemanticChunker:
 
         texts = [s["text"] for s in sentences]
         embeddings = self.model.encode(
-            texts, convert_to_numpy=True, show_progress_bar=False
+            texts,
+            convert_to_numpy=True,
+            batch_size=64,
+            show_progress_bar=False,
         )
         # L2 normalise for cosine via dot product
         norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
@@ -130,25 +138,20 @@ class SemanticChunker:
                         }
                     )
         elif "segments" in transcript:
-            # Segment-level fallback: split on sentence-ending punctuation
+            # Use each Whisper segment as an atomic unit — segments are natural speech
+            # pauses and already sentence-like; sub-sentence splitting produces embeddings
+            # that are too short and semantically unstable.
             for seg in transcript["segments"]:
                 seg_text = seg.get("text", "").strip()
-                seg_start = seg.get("start", 0)
-                seg_end = seg.get("end", 0)
-                parts = re.split(r"(?<=[.?!])\s+", seg_text)
-                parts = [p.strip() for p in parts if p.strip()]
-                if not parts:
+                if not seg_text:
                     continue
-                duration = seg_end - seg_start
-                time_per = duration / len(parts)
-                for i, part in enumerate(parts):
-                    sentences.append(
-                        {
-                            "text": part,
-                            "time_start": seg_start + i * time_per,
-                            "time_end": seg_start + (i + 1) * time_per,
-                        }
-                    )
+                sentences.append(
+                    {
+                        "text": seg_text,
+                        "time_start": seg.get("start", 0),
+                        "time_end": seg.get("end", 0),
+                    }
+                )
 
         return sentences
 
@@ -176,7 +179,7 @@ class SemanticChunker:
             # Cosine similarity between current buffer centroid and next sentence
             sim = float(np.dot(buf_emb, emb))
 
-            if sim < SIM_THRESHOLD or buf_tokens + tokens > MAX_CHUNK_TOKENS:
+            if (sim < SIM_THRESHOLD or buf_tokens + tokens > MAX_CHUNK_TOKENS) and buf_tokens >= MIN_CHUNK_TOKENS:
                 chunks.append(
                     self._make_chunk(buf_sentences, chunk_idx, video_id, buf_emb)
                 )
