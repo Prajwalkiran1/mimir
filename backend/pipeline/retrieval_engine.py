@@ -301,8 +301,24 @@ class RetrievalEngine:
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored[:top_n]
     
-    def _vector_search(self, 
-                      decomposed_query: Dict[str, Any], 
+    async def retrieve_keyframes(self, query: str, k: int = 8) -> List[Dict[str, Any]]:
+        """Image channel: retrieve the most relevant keyframes for a text query.
+
+        Runs CLIP image-vector search (query encoded by CLIP's text tower) off the
+        event loop. Returned keyframes are ranked by cosine similarity in CLIP space
+        and are the visual counterpart to the text chunks from `retrieve`.
+        """
+        if not self.vector_store:
+            return []
+        loop = asyncio.get_running_loop()
+        results = await loop.run_in_executor(
+            None, self.vector_store.search_images, query, k
+        )
+        logger.info(f"Image search: {len(results)} keyframes for query")
+        return results
+
+    def _vector_search(self,
+                      decomposed_query: Dict[str, Any],
                       k: int,
                       expand_temporal: bool = True) -> List[Dict[str, Any]]:
         """Perform vector-based semantic search"""

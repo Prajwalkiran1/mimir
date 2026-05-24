@@ -229,6 +229,15 @@ class ApiService {
     }
   }
 
+  // Generate a NEW topic summary from already-processed indexes (no re-upload).
+  async getTopicSummary(taskId, topic, summaryLength = 'medium') {
+    return this.post('/api/v1/rag/topic-summary', {
+      video_id: taskId,
+      topic,
+      summary_length: summaryLength,
+    });
+  }
+
   async getPipelineLogs(taskId) {
     try {
       const response = await fetch(`${this.baseURL}/api/v1/pipeline-logs/${taskId}`);

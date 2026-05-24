@@ -1,7 +1,14 @@
-"""Vector Store for Semantic Search using FAISS
+"""Vector Store for Multimodal Semantic Search using FAISS
 
-FAISS IndexFlatIP with L2-normalised vectors = cosine similarity.
-SemanticChunker pre-computes embeddings; pass compute_embeddings=False
+Two parallel FAISS IndexFlatIP indexes (L2-normalised vectors = cosine similarity):
+  - text index : transcript chunks, MiniLM (all-MiniLM-L6-v2, 384-d)
+  - image index: keyframes, CLIP (clip-ViT-B-32, 512-d)
+
+A text query searches the text index directly (MiniLM) and the image index via
+CLIP's text tower — the two encoders live in a shared CLIP space for images and
+a separate MiniLM space for text, so each modality keeps its strongest encoder.
+
+SemanticChunker pre-computes the MiniLM embeddings; pass compute_embeddings=False
 to add_chunks to skip the second encode pass entirely.
 """
 
@@ -10,20 +17,22 @@ import json
 import os
 import numpy as np
 import faiss
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
 
 
 class VectorStore:
-    """FAISS-based vector store for semantic chunk retrieval."""
+    """FAISS-based multimodal vector store (text chunks + keyframe images)."""
 
     def __init__(
         self,
         embedding_dim: int = 384,
         model_name: str = "all-MiniLM-L6-v2",
         index_type: str = "flat",
+        clip_model_name: str = "clip-ViT-B-32",
+        clip_dim: int = 512,
     ):
         self.embedding_dim = embedding_dim
         self.model_name = model_name
@@ -33,32 +42,55 @@ class VectorStore:
         self.metadata: List[Dict[str, Any]] = []
         self.is_normalized = False
 
+        # Image (CLIP) channel — lazily initialised so text-only flows pay nothing.
+        self.clip_model_name = clip_model_name
+        self.clip_dim = clip_dim
+        self.clip_model: Optional[SentenceTransformer] = None
+        self.image_index = None
+        self.image_metadata: List[Dict[str, Any]] = []
+
     # ------------------------------------------------------------------ #
     # Lifecycle helpers                                                    #
     # ------------------------------------------------------------------ #
 
+    def _device(self) -> str:
+        try:
+            import torch
+            return "cuda" if torch.cuda.is_available() else "cpu"
+        except Exception:
+            return "cpu"
+
     def _ensure_model(self):
         if not self.model:
-            try:
-                import torch
-                device = "cuda" if torch.cuda.is_available() else "cpu"
-            except Exception:
-                device = "cpu"
+            device = self._device()
             self.model = SentenceTransformer(self.model_name, device=device)
             logger.info(f"Loaded sentence transformer: {self.model_name} on {device}")
+
+    def _ensure_clip(self):
+        """Lazy-load the CLIP model shared by image embedding and image-query encoding."""
+        if not self.clip_model:
+            device = self._device()
+            self.clip_model = SentenceTransformer(self.clip_model_name, device=device)
+            logger.info(f"Loaded CLIP model: {self.clip_model_name} on {device}")
 
     def _ensure_index(self):
         if self.index is None:
             self.index = faiss.IndexFlatIP(self.embedding_dim)
 
+    def _ensure_image_index(self):
+        if self.image_index is None:
+            self.image_index = faiss.IndexFlatIP(self.clip_dim)
+
     def reset(self):
-        """Clear index and metadata for a new task. Keeps loaded model."""
+        """Clear both indexes and metadata for a new task. Keeps loaded models."""
         self.index = faiss.IndexFlatIP(self.embedding_dim)
         self.metadata = []
         self.is_normalized = False
+        self.image_index = faiss.IndexFlatIP(self.clip_dim)
+        self.image_metadata = []
 
     def initialize(self):
-        """Load model + create index (only what's missing)."""
+        """Load text model + create text index (only what's missing)."""
         self._ensure_model()
         self._ensure_index()
         logger.info(f"Vector store initialised (index type: {self.index_type})")
@@ -128,6 +160,120 @@ class VectorStore:
 
         logger.info(f"Added {len(chunks)} chunks to vector store (total: {len(self.metadata)})")
 
+    # ------------------------------------------------------------------ #
+    # Image (CLIP) channel                                                 #
+    # ------------------------------------------------------------------ #
+
+    def embed_keyframe_images(
+        self, keyframes: List[Dict[str, Any]], batch_size: int = 16
+    ) -> Tuple[List[Dict[str, Any]], Optional[np.ndarray]]:
+        """Load + CLIP-encode keyframe JPEGs. Returns (readable_keyframes, L2-normalised embeddings).
+
+        Exposed separately so callers (e.g. visual_enrichment's zero-shot classifier)
+        can reuse the exact embeddings that go into the image index — no double encode.
+        """
+        if not keyframes:
+            return [], None
+
+        from PIL import Image
+
+        self._ensure_clip()
+
+        images: List["Image.Image"] = []
+        kept: List[Dict[str, Any]] = []
+        for kf in keyframes:
+            path = kf.get("frame_path")
+            if not path or not os.path.exists(path):
+                continue
+            try:
+                images.append(Image.open(path).convert("RGB"))
+                kept.append(kf)
+            except Exception as e:
+                logger.warning(f"Skipping unreadable keyframe {path}: {e}")
+
+        if not images:
+            logger.warning("embed_keyframe_images: no readable keyframe images")
+            return [], None
+
+        embeddings = self.clip_model.encode(
+            images,
+            convert_to_numpy=True,
+            batch_size=batch_size,
+            show_progress_bar=False,
+        ).astype(np.float32)
+        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        return kept, embeddings / norms
+
+    def add_keyframes(
+        self,
+        keyframes: List[Dict[str, Any]],
+        batch_size: int = 16,
+        precomputed: Optional[Tuple[List[Dict[str, Any]], np.ndarray]] = None,
+    ):
+        """Add keyframes to the image index.
+
+        Pass `precomputed=(kept_keyframes, embeddings)` from `embed_keyframe_images`
+        to avoid re-encoding (the enrichment path computes these for classification).
+        Missing/unreadable images are skipped, not fatal.
+        """
+        if not keyframes and not precomputed:
+            return
+
+        self._ensure_image_index()
+
+        if precomputed is not None:
+            kept, embeddings = precomputed
+        else:
+            kept, embeddings = self.embed_keyframe_images(keyframes, batch_size)
+
+        if embeddings is None or not kept:
+            return
+
+        self.image_index.add(np.asarray(embeddings, dtype=np.float32))
+
+        base = len(self.image_metadata)
+        for i, kf in enumerate(kept):
+            self.image_metadata.append({
+                "image_faiss_id": base + i,
+                "keyframe_id": kf.get("keyframe_id", f"kf_{base + i:04d}"),
+                "video_id": kf.get("video_id", ""),
+                "scene_id": kf.get("scene_id"),
+                "cluster_id": kf.get("cluster_id"),
+                "timestamp": float(kf.get("timestamp", 0.0)),
+                "frame_path": kf.get("frame_path"),
+                "description": kf.get("description", ""),
+                "informativeness_score": float(kf.get("informativeness_score", 0.0)),
+            })
+
+        logger.info(
+            f"Added {len(kept)} keyframes to image index (total: {len(self.image_metadata)})"
+        )
+
+    def search_images(self, query: str, k: int = 10) -> List[Dict[str, Any]]:
+        """Retrieve keyframes whose CLIP image embedding is closest to the text query.
+
+        The query is encoded by CLIP's text tower into the shared CLIP space, so a
+        plain text query (e.g. "architecture diagram") can surface the matching frame.
+        """
+        if not self.image_index or self.image_index.ntotal == 0:
+            return []
+
+        self._ensure_clip()
+        q_emb = self.clip_model.encode([query], convert_to_numpy=True)[0]
+        q_emb = q_emb.astype(np.float32).reshape(1, -1)
+        q_emb /= np.linalg.norm(q_emb) + 1e-9
+
+        scores, indices = self.image_index.search(q_emb, min(k, self.image_index.ntotal))
+
+        results: List[Dict[str, Any]] = []
+        for score, idx in zip(scores[0], indices[0]):
+            if 0 <= idx < len(self.image_metadata):
+                r = self.image_metadata[idx].copy()
+                r["image_score"] = float(score)
+                results.append(r)
+        return results
+
     def search(
         self,
         query: str,
@@ -182,6 +328,15 @@ class VectorStore:
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(saveable, f, indent=2)
 
+        # Image (CLIP) channel — only persisted when keyframes were indexed.
+        if self.image_index is not None and self.image_index.ntotal > 0:
+            img_index_path = os.path.join(output_dir, f"{video_id}_image_store.faiss")
+            faiss.write_index(self.image_index, img_index_path.replace("\\", "/"))
+            img_meta_path = os.path.join(output_dir, f"{video_id}_image_store_meta.json")
+            with open(img_meta_path, "w", encoding="utf-8") as f:
+                json.dump(self.image_metadata, f, indent=2)
+            logger.info(f"Saved image index ({self.image_index.ntotal} keyframes) → {img_index_path}")
+
         logger.info(f"Saved vector store → {index_path}")
         return index_path, meta_path
 
@@ -196,6 +351,16 @@ class VectorStore:
         with open(meta_path, "r", encoding="utf-8") as f:
             vs.metadata = json.load(f)
         vs.is_normalized = True
+
+        # Restore the image channel if it was persisted (CLIP model loaded lazily on search).
+        img_index_path = os.path.join(output_dir, f"{video_id}_image_store.faiss")
+        img_meta_path = os.path.join(output_dir, f"{video_id}_image_store_meta.json")
+        if os.path.exists(img_index_path) and os.path.exists(img_meta_path):
+            vs.image_index = faiss.read_index(img_index_path.replace("\\", "/"))
+            with open(img_meta_path, "r", encoding="utf-8") as f:
+                vs.image_metadata = json.load(f)
+            logger.info(f"Loaded image index ({vs.image_index.ntotal} keyframes)")
+
         logger.info(f"Loaded vector store from {index_path}")
         return vs
 

@@ -1,0 +1,46 @@
+# Minimal, Mac/CPU-clean dependency set — only what the pipeline actually imports.
+# (Dropped vs requirements.txt: whisperx, pyannote.*, speechbrain, lightning,
+#  tensorboardX, torch-audiomentations, pytorch-metric-learning, asteroid-filterbanks,
+#  datasets, accelerate, pandas, torchaudio, ctranslate2(direct), celery, redis,
+#  tqdm, semver, stable-ts, aiofiles, requests, pyyaml — none are imported.)
+
+# Core framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+pydantic-settings
+
+# Core ML / numerical
+numpy==1.26.4
+scipy==1.13.1
+scikit-learn==1.4.2
+torch>=2.2
+
+# Transcription (ctranslate2 pulled transitively)
+faster-whisper>=1.1.1
+
+# Embeddings + vector search (transformers/tokenizers/huggingface-hub transitive)
+sentence-transformers==2.7.0
+faiss-cpu
+
+# Vision + OCR
+opencv-python-headless
+Pillow
+imagehash>=4.3.1
+pytesseract>=0.3.10
+
+# NLP + knowledge graph
+nltk
+spacy
+networkx
+
+# Database + auth
+SQLAlchemy
+bcrypt
+PyJWT
+
+# LLM API
+google-generativeai>=0.8.0
+
+# Audio extraction wrapper
+ffmpeg-python

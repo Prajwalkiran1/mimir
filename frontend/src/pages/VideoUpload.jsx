@@ -529,12 +529,24 @@ const VideoUpload = () => {
   };
 
   const handleDownload = (type) => {
+    const stem = videoFile?.name?.replace(/\.[^/.]+$/, '') || 'video';
+    // Server-side artifacts (chaptered MP4 / notes markdown) download via /uploads URL.
+    if (type === 'chaptered_video' && results.chaptered_video_url) {
+      const a = document.createElement('a'); a.href = results.chaptered_video_url;
+      a.download = `chaptered_${stem}.mp4`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); return;
+    }
+    if (type === 'notes' && results.notes_url) {
+      const a = document.createElement('a'); a.href = results.notes_url;
+      a.download = `notes_${stem}.md`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); return;
+    }
     let content = '', filename = '';
     switch (type) {
       case 'transcript': content = typeof results.transcript === 'string' ? results.transcript : ''; filename = `transcript_${videoFile.name.replace(/\.[^/.]+$/, '')}.txt`; break;
       case 'subtitles': content = typeof results.subtitles === 'string' ? results.subtitles : ''; filename = `subtitles_${videoFile.name.replace(/\.[^/.]+$/, '')}.${subtitleFormat}`; break;
       case 'summary':
-        content = results.summary?.text || '';
+        content = results.summary?.summary || results.summary?.text || '';
         if (results.summary?.key_points?.length) content += '\n\nKey Points:\n' + results.summary.key_points.map(p => `• ${p}`).join('\n');
         filename = `summary_${videoFile.name.replace(/\.[^/.]+$/, '')}.txt`; break;
       case 'keyframes':

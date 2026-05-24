@@ -1,18 +1,64 @@
 """RAG (Retrieval-Augmented Generation) API endpoints"""
 
 import os
+import json
 import logging
+from collections import OrderedDict
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from pipeline.knowledge_graph import KnowledgeGraph
 from pipeline.vector_store import VectorStore
 from pipeline.retrieval_engine import RetrievalEngine
-from app_state import task_manager
+from app_state import task_manager, orchestrator as pipeline_orchestrator
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/rag", tags=["rag"])
+
+# Small LRU of retrieval engines loaded from disk, so iterating on topics for one
+# video doesn't re-read the FAISS index / reload models each request. Keyed by
+# video_id, invalidated when the persisted chunks file changes (re-processing).
+_ENGINE_CACHE: "OrderedDict[str, tuple]" = OrderedDict()
+_ENGINE_CACHE_MAX = 4
+
+
+def _load_retrieval_engine(video_id: str) -> RetrievalEngine:
+    """Load persisted chunks (incl. visual), KG, and FAISS text+image indexes → RetrievalEngine."""
+    task = task_manager.get_task(video_id)
+    if not task or not task.results or not task.results.get("rag"):
+        raise HTTPException(status_code=404, detail="Video not found or RAG not completed")
+    rag = task.results["rag"]
+    index_dir = rag.get("index_dir")
+    chunks_dir = rag.get("chunks_dir")
+    if not index_dir or not chunks_dir:
+        raise HTTPException(status_code=400, detail="RAG index paths unavailable for this video")
+
+    chunks_path = os.path.join(chunks_dir, f"{video_id}_chunks.json")
+    kg_path = os.path.join(index_dir, f"{video_id}_knowledge_graph.pkl")
+    if not os.path.exists(chunks_path) or not os.path.exists(kg_path):
+        raise HTTPException(status_code=404, detail="RAG artifacts not found on disk")
+
+    mtime = os.path.getmtime(chunks_path)
+    cached = _ENGINE_CACHE.get(video_id)
+    if cached and cached[1] == mtime:
+        _ENGINE_CACHE.move_to_end(video_id)
+        return cached[0]
+
+    kg = KnowledgeGraph()
+    kg.graph = KnowledgeGraph.load_graph(kg_path)
+    vs = VectorStore.load(index_dir, video_id)  # restores text + CLIP image indexes
+    with open(chunks_path, "r", encoding="utf-8") as f:
+        chunks = json.load(f)
+
+    engine = RetrievalEngine()
+    engine.initialize(kg, vs, chunks)
+
+    _ENGINE_CACHE[video_id] = (engine, mtime)
+    _ENGINE_CACHE.move_to_end(video_id)
+    while len(_ENGINE_CACHE) > _ENGINE_CACHE_MAX:
+        _ENGINE_CACHE.popitem(last=False)
+    return engine
 
 # Pydantic models
 class QueryRequest(BaseModel):
@@ -37,6 +83,53 @@ class EntityRequest(BaseModel):
 class VideoIndexRequest(BaseModel):
     video_id: str
     index_path: str
+
+class TopicSummaryRequest(BaseModel):
+    video_id: Optional[str] = None
+    task_id: Optional[str] = None        # alias — video_id == task_id
+    topic: str
+    summary_length: str = "medium"       # short | medium | long
+
+
+@router.post("/topic-summary")
+async def topic_summary(request: TopicSummaryRequest):
+    """Generate a NEW topic-focused summary from a video's persisted indexes — no re-upload.
+
+    Reuses the orchestrator's retrieval+summarisation as a pure function of a locally
+    loaded engine (does not touch the singleton orchestrator's in-memory indexes).
+    """
+    video_id = request.video_id or request.task_id
+    if not video_id:
+        raise HTTPException(status_code=400, detail="video_id or task_id is required")
+    if not request.topic or not request.topic.strip():
+        raise HTTPException(status_code=400, detail="topic is required")
+
+    engine = _load_retrieval_engine(video_id)
+
+    summary = await pipeline_orchestrator._run_summarization_via_retrieval(
+        engine, topic=request.topic, summary_length=request.summary_length, generate=True,
+    )
+
+    try:
+        retrieved_kfs = await engine.retrieve_keyframes(request.topic, k=8)
+    except Exception:
+        retrieved_kfs = []
+    citations = pipeline_orchestrator._build_citations(
+        summary.get("retrieval_scores", []), {}, retrieved_keyframes=retrieved_kfs,
+    )
+    for c in citations:
+        fp = c.get("keyframe_path")
+        if fp:
+            u = fp.replace("\\", "/")
+            c["keyframe_url"] = u if u.startswith("/") else "/" + u
+
+    return {
+        "video_id": video_id,
+        "topic": request.topic,
+        "summary_length": request.summary_length,
+        "topic_summary": summary,
+        "citations": citations,
+    }
 
 @router.post("/query")
 async def query_video(request: QueryRequest):

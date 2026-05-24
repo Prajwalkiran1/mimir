@@ -200,16 +200,54 @@ def _enrich_results_with_urls(results: Dict[str, Any], task_id: str, video_path:
 
     # Keyframe image URLs — keyframe_extraction stores frame_path as
     # uploads/{video_stem}/frames/keyframe_{ts}.jpg (relative, OS-native sep).
+    def _frame_url(fp: Optional[str]) -> Optional[str]:
+        if not fp:
+            return None
+        url_path = fp.replace("\\", "/")
+        if not url_path.startswith("/"):
+            url_path = "/" + url_path
+        return url_path
+
     kf_block = results.get("keyframes")
     if isinstance(kf_block, dict) and isinstance(kf_block.get("keyframes"), list):
         for kf in kf_block["keyframes"]:
-            fp = kf.get("frame_path")
-            if not fp:
-                continue
-            url_path = fp.replace("\\", "/")
-            if not url_path.startswith("/"):
-                url_path = "/" + url_path
-            kf["frame_url"] = url_path
+            url = _frame_url(kf.get("frame_path"))
+            if url:
+                kf["frame_url"] = url
+
+    # CLIP-retrieved keyframes (image channel) returned by the retrieval engine.
+    if isinstance(results.get("retrieved_keyframes"), list):
+        for kf in results["retrieved_keyframes"]:
+            url = _frame_url(kf.get("frame_path"))
+            if url:
+                kf["frame_url"] = url
+
+    # Citations carry a paired keyframe path for inline thumbnails.
+    if isinstance(results.get("citations"), list):
+        for cit in results["citations"]:
+            url = _frame_url(cit.get("keyframe_path"))
+            if url:
+                cit["keyframe_url"] = url
+
+    # Visual (OCR) chunks — thumbnail for the "On-screen" view.
+    if isinstance(results.get("visual_chunks"), list):
+        for vc in results["visual_chunks"]:
+            url = _frame_url(vc.get("frame_path"))
+            if url:
+                vc["frame_url"] = url
+
+    # Chaptered MP4 + WebVTT chapters track (Phase 4.5), served by the /uploads mount.
+    cv = results.get("chaptered_video")
+    if isinstance(cv, dict):
+        if cv.get("mp4_path"):
+            results["chaptered_video_url"] = f"/uploads/{task_id}/{os.path.basename(cv['mp4_path'])}"
+        if cv.get("vtt_chapters_path"):
+            results["chapters_vtt_url"] = f"/uploads/{task_id}/{os.path.basename(cv['vtt_chapters_path'])}"
+
+    # Structured notes markdown (Phase 4.6).
+    nt = results.get("notes")
+    if isinstance(nt, dict) and nt.get("notes_path"):
+        results["notes_url"] = f"/uploads/{task_id}/{os.path.basename(nt['notes_path'])}"
 
 
 def process_video_task(task_id: str, video_path: str, options: ProcessingOptions):

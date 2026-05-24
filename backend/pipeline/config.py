@@ -16,7 +16,25 @@ class PipelineConfig(BaseSettings):
     whisper_model: str = "tiny"
     transformers_cache_dir: str = "models"
     spacy_model: str = "en_core_web_sm"
-    
+
+    # Transcription performance (latency is the primary concern for long videos)
+    whisper_batch_size: int = 16          # BatchedInferencePipeline batch size
+    transcribe_workers: int = 4           # parallel processes for long audio
+    transcribe_window_sec: int = 300      # ~5 min windows for chunked-parallel
+    transcribe_parallel_min_sec: int = 420  # only parallelise audio longer than this
+
+    # Visual enrichment (CLIP frame-filter + local OCR — free, no rate limit)
+    enable_visual_enrichment: bool = True
+    ocr_engine: str = "tesseract"         # 'tesseract' | 'easyocr'
+    ocr_max_workers: int = 4
+    ocr_min_chars: int = 12               # ignore frames whose OCR text is shorter
+
+    # Chapters + map-reduce summarisation
+    enable_chapters: bool = True
+    chapter_target_min_sec: int = 300     # ~5 min minimum chapter (bounds Gemini call count)
+    chapter_target_max_sec: int = 900     # ~15 min maximum chapter
+    map_reduce_concurrency: int = 3       # concurrent per-chapter Gemini calls (free-tier RPM)
+
     # Processing Configuration
     max_file_size_mb: int = 500
     chunk_size_seconds: int = 30

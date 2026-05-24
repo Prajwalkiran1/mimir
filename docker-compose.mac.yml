@@ -1,0 +1,29 @@
+# Local Mac (CPU) test stack — backend only. Frontend runs on the host (`npm run dev`).
+# Teardown removes everything: docker compose -f docker-compose.mac.yml down --rmi all -v
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.mac
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONPATH=/app
+      - USE_GPU=false
+      # CLIP+OCR visual branch deadlocks on torch/OpenMP under Docker-on-Mac's emulated
+      # CPU (see onnxruntime "Unknown CPU vendor" warnings). Disabled so the rest of the
+      # pipeline (transcription, keyframes, chapters, summaries, chaptered MP4) runs.
+      - ENABLE_VISUAL_ENRICHMENT=false
+      # Keep the laptop cooler: 2 parallel transcription workers (not 4) and bound each
+      # worker's thread pool so they don't all grab every core and oversubscribe.
+      - TRANSCRIBE_WORKERS=2
+      - OMP_NUM_THREADS=4
+    env_file:
+      - ./backend/.env          # GEMINI_API_KEY (gitignored); optional
+    volumes:
+      - ./backend:/app          # code + uploads/ + mimir.db live in the repo
+      - mimir_modelcache:/cache # model downloads (named volume; wiped by `down -v`)
+    restart: unless-stopped
+
+volumes:
+  mimir_modelcache:

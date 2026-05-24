@@ -311,12 +311,14 @@ class KeyframeExtractor:
             if not ret:
                 continue
 
+            phash_val = None
             if IMAGEHASH_AVAILABLE:
                 pil_img = PILImage.fromarray(cv2.cvtColor(full_frame, cv2.COLOR_BGR2RGB))
                 h = imagehash.phash(pil_img)
                 if any(h - ph < self.HASH_THRESHOLD for ph in seen_hashes):
                     continue
                 seen_hashes.append(h)
+                phash_val = str(h)
 
             ts = sel["timestamp"]
             kf_filename = f"keyframe_sc{sel['scene_id']:03d}_kf{kf_id:03d}_t{ts:.3f}.jpg"
@@ -330,6 +332,7 @@ class KeyframeExtractor:
                 "timestamp":            round(ts, 3),
                 "informativeness_score": round(sel["score"], 4),
                 "frame_path":           kf_path,
+                "phash":                phash_val,
                 "description":          f"Scene {sel['scene_id']} keyframe at {ts:.1f}s",
             })
             kf_id += 1

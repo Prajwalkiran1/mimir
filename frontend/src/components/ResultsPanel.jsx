@@ -1,8 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Download, Play, FileText, Brain, Image, Search, CheckCircle, BarChart2,
 } from 'lucide-react';
+import apiService from '../services/api';
+
+const fmtTime = (sec) => {
+  const s = Math.max(0, Math.floor(Number(sec) || 0));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
 
 /* ─── Self-contained styles ──────────────────────────────────────────────────── */
 const PanelStyles = () => (
@@ -247,6 +253,71 @@ const PanelStyles = () => (
       max-height: 420px; overflow-y: auto;
       white-space: pre-wrap; word-wrap: break-word;
     }
+
+    /* Chapters */
+    .rp-chapters { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
+    .rp-chapter {
+      display: flex; gap: 12px; align-items: flex-start;
+      background: rgba(5, 10, 20, 0.55);
+      border: 1px solid rgba(201, 168, 76, 0.10);
+      border-radius: 12px; padding: 12px 14px; text-align: left; width: 100%;
+      cursor: pointer; transition: all 0.18s ease; font-family: 'DM Sans', sans-serif;
+    }
+    .rp-chapter:hover { border-color: rgba(201, 168, 76, 0.4); background: rgba(20, 35, 55, 0.5); }
+    .rp-chapter-ts {
+      font-family: 'Menlo','Consolas',monospace; font-size: 0.72rem; color: #c9a84c;
+      background: rgba(201,168,76,0.1); border: 1px solid rgba(201,168,76,0.2);
+      border-radius: 7px; padding: 3px 8px; flex-shrink: 0; margin-top: 2px;
+    }
+    .rp-chapter-title { font-size: 0.9rem; color: #fdf8ee; font-weight: 500; }
+    .rp-chapter-sum { font-size: 0.8rem; color: rgba(248,235,190,0.7); line-height: 1.55; margin-top: 4px; }
+    .rp-chapter-kp { margin: 6px 0 0; padding-left: 16px; }
+    .rp-chapter-kp li { font-size: 0.78rem; color: rgba(248,235,190,0.7); line-height: 1.5; }
+
+    /* On-screen / visual chunks */
+    .rp-visual-card {
+      display: grid; grid-template-columns: 200px 1fr; gap: 14px;
+      background: rgba(5, 10, 20, 0.55);
+      border: 1px solid rgba(201, 168, 76, 0.10);
+      border-radius: 12px; padding: 12px; margin-bottom: 12px;
+    }
+    @media (max-width: 640px) { .rp-visual-card { grid-template-columns: 1fr; } }
+    .rp-visual-card img { width: 100%; border-radius: 8px; border: 1px solid rgba(201,168,76,0.18); }
+    .rp-visual-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .rp-visual-text {
+      font-family: 'Menlo','Consolas',monospace; font-size: 0.74rem;
+      color: rgba(248,235,190,0.85); white-space: pre-wrap; word-break: break-word;
+      max-height: 220px; overflow-y: auto; line-height: 1.5;
+      background: rgba(0,0,0,0.35); border-radius: 8px; padding: 10px;
+    }
+
+    /* Interactive topic generator */
+    .rp-topic-form { display: flex; gap: 8px; margin-bottom: 16px; }
+    .rp-topic-input {
+      flex: 1; font-family: 'DM Sans', sans-serif; font-size: 0.86rem;
+      background: rgba(5,10,20,0.6); border: 1px solid rgba(201,168,76,0.22);
+      border-radius: 10px; padding: 10px 14px; color: #fdf8ee; outline: none;
+    }
+    .rp-topic-input:focus { border-color: rgba(201,168,76,0.5); }
+    .rp-topic-btn {
+      font-family: 'DM Sans', sans-serif; font-size: 0.82rem; font-weight: 500;
+      background: rgba(201,168,76,0.16); border: 1px solid rgba(201,168,76,0.4);
+      color: #fdf8ee; border-radius: 10px; padding: 0 18px; cursor: pointer;
+      display: flex; align-items: center; gap: 8px; transition: all 0.2s;
+    }
+    .rp-topic-btn:hover:not(:disabled) { background: rgba(201,168,76,0.28); }
+    .rp-topic-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .rp-topic-result {
+      background: rgba(5,10,20,0.55); border: 1px solid rgba(201,168,76,0.10);
+      border-radius: 12px; padding: 16px 18px; margin-bottom: 12px;
+    }
+    .rp-topic-result h4 {
+      font-family: 'DM Serif Display', Georgia, serif; font-size: 0.98rem;
+      color: #c9a84c; margin: 0 0 8px;
+    }
+    .rp-topic-result p { font-size: 0.85rem; color: rgba(248,235,190,0.82); line-height: 1.7; margin: 0; }
+    .rp-spin { animation: rpSpin 1s linear infinite; }
+    @keyframes rpSpin { to { transform: rotate(360deg); } }
   `}</style>
 );
 
@@ -262,12 +333,62 @@ const ResultsPanel = ({
   showSuccessBar = true,
   taskId,
 }) => {
+  const videoRef = useRef(null);
+  const chapters = Array.isArray(results.chapters) ? results.chapters : [];
+  const visualChunks = Array.isArray(results.visual_chunks) ? results.visual_chunks : [];
+
+  const seekTo = (sec) => {
+    setActiveTab('subtitles');
+    // allow the tab + <video> to mount before seeking
+    setTimeout(() => {
+      if (videoRef.current) {
+        videoRef.current.currentTime = Number(sec) || 0;
+        videoRef.current.play?.().catch(() => {});
+      }
+    }, 60);
+  };
+
+  // Interactive on-demand topic summaries (no re-upload)
+  const [topicInput, setTopicInput] = useState('');
+  const [topicLoading, setTopicLoading] = useState(false);
+  const [topicError, setTopicError] = useState(null);
+  const [topicResults, setTopicResults] = useState(() =>
+    results.topic_summary
+      ? [{
+          topic: results.topic_summary.topic || 'Processed topic',
+          summary: results.topic_summary.text || results.topic_summary.summary || '',
+          key_points: results.topic_summary.key_points || [],
+        }]
+      : []
+  );
+
+  const generateTopic = async () => {
+    const topic = topicInput.trim();
+    if (!topic || !taskId) return;
+    setTopicLoading(true); setTopicError(null);
+    try {
+      const res = await apiService.getTopicSummary(taskId, topic);
+      const ts = res.topic_summary || {};
+      setTopicResults((prev) => [
+        { topic, summary: ts.summary || '', key_points: ts.key_points || [] },
+        ...prev,
+      ]);
+      setTopicInput('');
+    } catch (e) {
+      setTopicError('Could not generate summary. Make sure processing finished.');
+    } finally {
+      setTopicLoading(false);
+    }
+  };
+
   const tabs = [];
   if (selectedOptions.transcript) tabs.push({ id: 'transcript', label: 'Transcript',      icon: FileText });
-  if (selectedOptions.subtitles)  tabs.push({ id: 'subtitles',  label: 'Subtitles',       icon: Play });
+  if (selectedOptions.subtitles)  tabs.push({ id: 'subtitles',  label: 'Video',           icon: Play });
+  if (chapters.length > 0)        tabs.push({ id: 'chapters',   label: 'Chapters',         icon: BarChart2 });
   if (selectedOptions.summary)    tabs.push({ id: 'summary',    label: 'General Summary', icon: Brain });
-  // Topic summary tab — always show if enabled, dim when no data
-  if (selectedOptions.topicBased) tabs.push({ id: 'topic',      label: 'Topic Summary',   icon: Search });
+  // Topic summary tab — always available so users can ask for more without re-uploading
+  tabs.push({ id: 'topic', label: 'Topic Summaries', icon: Search });
+  if (visualChunks.length > 0)    tabs.push({ id: 'visual',     label: 'On-screen',        icon: Image });
   // Keyframes always extracted but tab shown when data is present
   if (results.keyframes?.length > 0) tabs.push({ id: 'keyframes', label: 'Keyframes', icon: Image });
 
@@ -353,6 +474,11 @@ const ResultsPanel = ({
               </div>
               <div className="rp-panel-actions">
                 <span className="rp-badge rp-badge-dim">{(subtitleFormat || 'srt').toUpperCase()}</span>
+                {results.chaptered_video_url && (
+                  <button onClick={() => onDownload('chaptered_video')} className="rp-icon-btn" title="Download chaptered MP4">
+                    <Play size={14} />
+                  </button>
+                )}
                 <button onClick={() => onDownload('subtitles')} className="rp-icon-btn" title="Download subtitles">
                   <Download size={14} />
                 </button>
@@ -361,11 +487,15 @@ const ResultsPanel = ({
             <div className="rp-panel-body">
               <div className="rp-video-container">
                 {results.video_url ? (
-                  <video controls preload="metadata">
+                  <video ref={videoRef} controls preload="metadata">
                     <source src={results.video_url} />
                     {results.subtitles_vtt_url && (
                       <track kind="subtitles" label="English" srcLang="en"
                         src={results.subtitles_vtt_url} default />
+                    )}
+                    {results.chapters_vtt_url && (
+                      <track kind="chapters" label="Chapters" srcLang="en"
+                        src={results.chapters_vtt_url} />
                     )}
                     Your browser does not support inline video playback.
                   </video>
@@ -373,6 +503,20 @@ const ResultsPanel = ({
                   <div className="rp-video-fallback">Video preview not available.</div>
                 )}
               </div>
+
+              {chapters.length > 0 && (
+                <div className="rp-chapters">
+                  {chapters.map((ch) => (
+                    <button key={ch.index} className="rp-chapter" onClick={() => seekTo(ch.start_sec)}>
+                      <span className="rp-chapter-ts">{fmtTime(ch.start_sec)}</span>
+                      <span>
+                        <span className="rp-chapter-title">{ch.title || `Chapter ${ch.index + 1}`}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
               <div className="rp-srt-toggle-row">
                 <button type="button" onClick={() => setShowRawSrt(v => !v)} className="rp-srt-toggle-btn">
                   {showRawSrt ? '▾' : '▸'} {showRawSrt ? 'Hide' : 'Show'} raw subtitles
@@ -472,55 +616,134 @@ const ResultsPanel = ({
           </>
         )}
 
-        {/* TOPIC SUMMARY */}
+        {/* TOPIC SUMMARIES — interactive, generate more without re-uploading */}
         {activeTab === 'topic' && (
           <>
             <div className="rp-panel-header">
               <div className="rp-panel-title">
                 <div className="rp-panel-title-icon"><Search size={15} color="rgba(201,168,76,0.85)" /></div>
-                Topic Summary
-                {results.topic_summary?.topic && (
-                  <span style={{ fontSize: '0.72rem', color: 'rgba(220,195,130,0.5)', fontFamily: 'DM Sans, sans-serif', marginLeft: 8 }}>
-                    {results.topic_summary.topic}
-                  </span>
-                )}
-              </div>
-              <div className="rp-panel-actions">
-                <div className="rp-meta-row">
-                  {results.topic_summary?.retrieved_chunk_count != null && (
-                    <span className="rp-badge rp-badge-dim">{results.topic_summary.retrieved_chunk_count} chunks retrieved</span>
-                  )}
-                  <span className={`rp-badge ${results.topic_summary?.summary_type === 'gemini' ? 'rp-badge-teal' : 'rp-badge-dim'}`}>
-                    {results.topic_summary?.summary_type === 'gemini' ? 'Gemini' : 'Fallback'}
-                  </span>
-                  <button onClick={() => onDownload('topic_summary')} className="rp-icon-btn" title="Download topic summary">
-                    <Download size={14} />
-                  </button>
-                </div>
+                Topic Summaries
               </div>
             </div>
             <div className="rp-panel-body">
-              {results.topic_summary ? (
-                <div className="rp-summary-layout">
-                  <div className="rp-summary-text-block">
-                    {results.topic_summary.text || 'No topic summary available.'}
-                  </div>
-                  {results.topic_summary.key_points?.length > 0 && (
-                    <div className="rp-keypoints-block">
-                      <div className="rp-keypoints-label">Key Points</div>
-                      {results.topic_summary.key_points.map((point, i) => (
-                        <div key={i} className="rp-keypoint-item">
-                          <div className="rp-keypoint-bullet">{i + 1}</div>
-                          <span>{point}</span>
-                        </div>
-                      ))}
-                    </div>
+              <div className="rp-topic-form">
+                <input
+                  className="rp-topic-input"
+                  placeholder="Ask for a topic-specific summary (e.g. 'the binary search code')"
+                  value={topicInput}
+                  onChange={(e) => setTopicInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && generateTopic()}
+                  disabled={topicLoading || !taskId}
+                />
+                <button
+                  className="rp-topic-btn"
+                  onClick={generateTopic}
+                  disabled={topicLoading || !taskId || !topicInput.trim()}
+                >
+                  {topicLoading
+                    ? <span className="rp-spin" style={{ display: 'inline-block' }}>⟳</span>
+                    : <Search size={14} />}
+                  {topicLoading ? 'Generating…' : 'Generate'}
+                </button>
+              </div>
+              {topicError && (
+                <div style={{ color: '#f87171', fontSize: '0.8rem', marginBottom: 12 }}>{topicError}</div>
+              )}
+              {topicResults.length === 0 && !topicLoading && (
+                <div style={{ padding: '40px 24px', textAlign: 'center', color: 'rgba(220,195,130,0.5)', fontSize: '0.86rem', fontStyle: 'italic' }}>
+                  No topic summaries yet — type a topic above to generate one from the processed video.
+                </div>
+              )}
+              {topicResults.map((tr, i) => (
+                <div key={i} className="rp-topic-result">
+                  <h4>{tr.topic}</h4>
+                  <p>{tr.summary || 'No content found for this topic.'}</p>
+                  {tr.key_points?.length > 0 && (
+                    <ul className="rp-chapter-kp">
+                      {tr.key_points.map((p, j) => <li key={j}>{p}</li>)}
+                    </ul>
                   )}
                 </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* CHAPTERS — structured, with seek + per-chapter summary */}
+        {activeTab === 'chapters' && (
+          <>
+            <div className="rp-panel-header">
+              <div className="rp-panel-title">
+                <div className="rp-panel-title-icon"><BarChart2 size={15} color="rgba(201,168,76,0.85)" /></div>
+                Chapters
+                <span className="rp-badge rp-badge-dim" style={{ marginLeft: 8 }}>{chapters.length}</span>
+              </div>
+              <div className="rp-panel-actions">
+                {results.notes_url && (
+                  <button onClick={() => onDownload('notes')} className="rp-icon-btn" title="Download notes (.md)">
+                    <Download size={14} />
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="rp-panel-body">
+              <div className="rp-chapters">
+                {chapters.map((ch) => (
+                  <div key={ch.index} className="rp-chapter" style={{ cursor: 'default' }}>
+                    <button
+                      className="rp-chapter-ts"
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => seekTo(ch.start_sec)}
+                      title="Jump to chapter"
+                    >
+                      {fmtTime(ch.start_sec)}
+                    </button>
+                    <div style={{ flex: 1 }}>
+                      <div className="rp-chapter-title">{ch.title || `Chapter ${ch.index + 1}`}</div>
+                      {ch.summary && <div className="rp-chapter-sum">{ch.summary}</div>}
+                      {ch.key_points?.length > 0 && (
+                        <ul className="rp-chapter-kp">
+                          {ch.key_points.map((p, j) => <li key={j}>{p}</li>)}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ON-SCREEN — OCR'd visual content (code/slides/diagrams) */}
+        {activeTab === 'visual' && (
+          <>
+            <div className="rp-panel-header">
+              <div className="rp-panel-title">
+                <div className="rp-panel-title-icon"><Image size={15} color="rgba(201,168,76,0.85)" /></div>
+                On-screen Content
+                <span className="rp-badge rp-badge-dim" style={{ marginLeft: 8 }}>{visualChunks.length}</span>
+              </div>
+            </div>
+            <div className="rp-panel-body">
+              {visualChunks.length === 0 ? (
+                <div className="rp-kf-empty">No on-screen text detected.</div>
               ) : (
-                <div style={{ padding: '48px 24px', textAlign: 'center', color: 'rgba(220,195,130,0.5)', fontSize: '0.86rem', fontStyle: 'italic' }}>
-                  No topic summary — enable "Topic Summary" and enter a topic before processing.
-                </div>
+                visualChunks.map((vc, i) => (
+                  <div key={i} className="rp-visual-card">
+                    <div>
+                      {vc.frame_url
+                        ? <img src={vc.frame_url} alt={`Frame at ${fmtTime(vc.time_start)}`} loading="lazy" />
+                        : <div className="rp-video-fallback" style={{ height: 110 }}>no image</div>}
+                      <div className="rp-visual-meta" style={{ marginTop: 8 }}>
+                        <button className="rp-chapter-ts" style={{ cursor: 'pointer' }} onClick={() => seekTo(vc.time_start)}>
+                          {fmtTime(vc.time_start)}
+                        </button>
+                        {vc.label && <span className="rp-badge rp-badge-dim">{vc.label}</span>}
+                      </div>
+                    </div>
+                    <div className="rp-visual-text">{vc.text}</div>
+                  </div>
+                ))
               )}
             </div>
           </>

@@ -22,6 +22,8 @@ from typing import Optional, Dict, Any, Callable, List
 from datetime import datetime
 import asyncio
 
+import numpy as np
+
 from pipeline.config import config
 from pipeline.transcription import TranscriptionEngine, TranscriptionError
 from pipeline.keyframe_extraction import KeyframeExtractor, KeyframeExtractionError
@@ -31,6 +33,10 @@ from pipeline.semantic_chunking import SemanticChunker
 from pipeline.knowledge_graph import KnowledgeGraph
 from pipeline.vector_store import VectorStore
 from pipeline.retrieval_engine import RetrievalEngine
+from pipeline.visual_enrichment import (
+    VisualEnricher, detect_visual_reference_moments, CONTENT_LABELS,
+)
+from pipeline.chapter_segmentation import segment_into_chapters
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +60,7 @@ class PipelineOrchestrator:
         self.knowledge_graph: Optional[KnowledgeGraph] = None
         self.vector_store: Optional[VectorStore] = None
         self.retrieval_engine: Optional[RetrievalEngine] = None
+        self.visual_enricher: Optional[VisualEnricher] = None
 
     def initialize_components(self):
         logger.info("Initializing pipeline components...")
@@ -90,6 +97,16 @@ class PipelineOrchestrator:
         except Exception as e:
             logger.warning(f"RAG components init failed: {e}")
 
+        if getattr(config, "enable_visual_enrichment", True):
+            try:
+                self.visual_enricher = VisualEnricher(
+                    ocr_engine=getattr(config, "ocr_engine", "tesseract"),
+                    ocr_max_workers=getattr(config, "ocr_max_workers", 4),
+                    ocr_min_chars=getattr(config, "ocr_min_chars", 12),
+                )
+            except Exception as e:
+                logger.warning(f"VisualEnricher init failed: {e}")
+
         logger.info("Pipeline components initialised.")
 
     # ------------------------------------------------------------------ #
@@ -114,40 +131,56 @@ class PipelineOrchestrator:
 
             results: Dict[str, Any] = {}
             pipeline_logs: Dict[str, Any] = {}
+            all_chunks: List[Dict[str, Any]] = []  # transcript+visual chunks, for notes
 
-            # ── Phase 1: Transcription + Keyframe Extraction (parallel) ── #
+            # ── Phase 1: Transcription ∥ (Keyframes → CLIP classify → OCR) ── #
+            # Branch B (keyframes+visual) runs concurrently with transcription so the
+            # CLIP/OCR latency is hidden behind Whisper (which dominates on long videos).
             t0 = time.time()
 
             if progress_callback:
-                progress_callback("Transcribing + extracting keyframes (parallel)...", 10)
+                progress_callback("Transcribing + extracting/reading keyframes (parallel)...", 10)
+
+            video_id = self._derive_video_id(video_path, options)
 
             run_transcription = (
                 options.get("transcript", True) and self.transcription_engine is not None
             )
             run_keyframes = self.keyframe_extractor is not None
 
+            empty_kf_bundle = {"keyframe_data": {}, "kept_kf": [], "kept_embs": None,
+                               "labels": {}, "ocr_by_kf": {}}
+
             if run_transcription and run_keyframes:
-                # Both available — run concurrently (they use different resources)
-                transcript, keyframe_data = await asyncio.gather(
+                transcript, kf_bundle = await asyncio.gather(
                     self._run_transcription(video_path, progress_callback),
-                    self._run_keyframe_extraction(video_path, progress_callback, transcript=None),
+                    self._run_keyframes_and_classify(video_path, video_id, progress_callback),
                 )
             elif run_transcription:
                 transcript = await self._run_transcription(video_path, progress_callback)
-                keyframe_data = {}
+                kf_bundle = empty_kf_bundle
             elif run_keyframes:
                 transcript = None
-                keyframe_data = await self._run_keyframe_extraction(
-                    video_path, progress_callback, transcript=None
+                kf_bundle = await self._run_keyframes_and_classify(
+                    video_path, video_id, progress_callback
                 )
             else:
                 transcript = None
-                keyframe_data = {}
+                kf_bundle = empty_kf_bundle
+
+            keyframe_data = kf_bundle["keyframe_data"]
+            kept_kf = kf_bundle["kept_kf"]
+            kept_embs = kf_bundle["kept_embs"]
+            frame_labels = kf_bundle["labels"]
+            ocr_by_kf = kf_bundle["ocr_by_kf"]
 
             results["transcript"] = transcript
             results["keyframes"] = keyframe_data if keyframe_data else None
 
             phase1_time = time.time() - t0
+            label_counts: Dict[str, int] = {}
+            for lbl in (frame_labels or {}).values():
+                label_counts[lbl] = label_counts.get(lbl, 0) + 1
             pipeline_logs["phase1"] = {
                 "transcript_segments": len(transcript["segments"]) if transcript else 0,
                 "total_frames_at_1fps": keyframe_data.get("total_frames_at_1fps", 0),
@@ -156,6 +189,8 @@ class PipelineOrchestrator:
                 "keyframes_selected": keyframe_data.get("extracted_count", 0),
                 "frame_scores_sample": keyframe_data.get("frame_scores_sample", []),
                 "scene_segments": keyframe_data.get("scene_segments", []),
+                "frame_labels": label_counts,
+                "ocr_frames": len(ocr_by_kf or {}),
                 "timing_sec": round(phase1_time, 2),
             }
 
@@ -169,13 +204,33 @@ class PipelineOrchestrator:
                 self.vector_store.reset()
                 self.knowledge_graph.reset()
 
-                video_id = self._derive_video_id(video_path, options)
+                # video_id was derived in Phase 1
                 index_dir = os.path.join(config.upload_dir, video_id, "index")
                 chunks_dir = os.path.join(config.upload_dir, video_id, "chunks")
 
                 semantic_chunks = self.semantic_chunker.chunk_transcript(
                     transcript or {}, video_id
                 )
+
+                # ── Phase 2.1: merge visual (OCR) chunks built from Phase 1 ──
+                # On-screen code/text becomes first-class retrievable chunks + KG nodes.
+                visual_chunks = self._build_and_embed_visual_chunks(
+                    kept_kf, ocr_by_kf, frame_labels, transcript, video_id
+                )
+                if visual_chunks:
+                    semantic_chunks = sorted(
+                        semantic_chunks + visual_chunks,
+                        key=lambda c: c.get("time_start", 0.0),
+                    )
+                    # Re-number + rewire prev/next so vector-store metadata stays consistent.
+                    for i, c in enumerate(semantic_chunks):
+                        c["chunk_index"] = i
+                        c["prev_chunk_id"] = semantic_chunks[i - 1]["chunk_id"] if i > 0 else None
+                        c["next_chunk_id"] = (
+                            semantic_chunks[i + 1]["chunk_id"] if i < len(semantic_chunks) - 1 else None
+                        )
+
+                all_chunks = semantic_chunks  # captured for notes assembly (Phase 4.6)
                 try:
                     self.semantic_chunker.save_chunks(semantic_chunks, chunks_dir, video_id)
                 except Exception as e:
@@ -194,6 +249,20 @@ class PipelineOrchestrator:
                 # Use pre-computed embeddings from SemanticChunker — avoids a second
                 # SentenceTransformer pass and eliminates the most common [Errno 22] path.
                 self.vector_store.add_chunks(semantic_chunks, compute_embeddings=False)
+
+                # Image channel: add keyframes to the CLIP image index. Reuse the
+                # embeddings already computed in Phase 1 for classification (no re-encode).
+                keyframes_for_index = (keyframe_data or {}).get("keyframes", []) or []
+                for kf in keyframes_for_index:
+                    kf.setdefault("video_id", video_id)
+                try:
+                    if kept_kf and kept_embs is not None:
+                        self.vector_store.add_keyframes(kept_kf, precomputed=(kept_kf, kept_embs))
+                    else:
+                        self.vector_store.add_keyframes(keyframes_for_index)
+                except Exception as e:
+                    logger.warning(f"add_keyframes failed (non-fatal): {e}")
+
                 try:
                     self.vector_store.save(index_dir, video_id)
                 except Exception as e:
@@ -228,40 +297,124 @@ class PipelineOrchestrator:
                 kg_nodes = kg.number_of_nodes()
                 kg_edges = kg.number_of_edges()
                 vs_size = self.vector_store.index.ntotal if self.vector_store.index else 0
+                img_size = (
+                    self.vector_store.image_index.ntotal
+                    if self.vector_store.image_index else 0
+                )
+
+                num_visual = sum(1 for c in semantic_chunks if c.get("modality") == "visual")
+                num_text = len(semantic_chunks) - num_visual
+
+                # Surface the visual (OCR) chunks for the frontend "On-screen" view.
+                results["visual_chunks"] = [
+                    {
+                        "chunk_id": c["chunk_id"],
+                        "time_start": c["time_start"],
+                        "time_end": c["time_end"],
+                        "keyframe_id": c.get("keyframe_id"),
+                        "frame_path": c.get("frame_path"),
+                        "label": c.get("label"),
+                        "is_referenced": c.get("is_referenced", False),
+                        "text": c.get("text", "")[:600],
+                    }
+                    for c in semantic_chunks if c.get("modality") == "visual"
+                ]
 
                 phase2_time = time.time() - t1
                 pipeline_logs["phase2"] = {
                     "total_chunks": len(semantic_chunks),
+                    "num_text_chunks": num_text,
+                    "num_visual_chunks": num_visual,
                     "kg_nodes": kg_nodes,
                     "kg_edges": kg_edges,
                     "kg_sample_edges": kg_sample_edges,
                     "vector_index_size": vs_size,
+                    "image_index_size": img_size,
                     "chunk_sizes": [c["token_count"] for c in semantic_chunks],
                     "timing_sec": round(phase2_time, 2),
                 }
 
                 results["rag"] = {
                     "video_id": video_id,
+                    "index_dir": index_dir,
+                    "chunks_dir": chunks_dir,
                     "num_chunks": len(semantic_chunks),
+                    "num_text_chunks": num_text,
+                    "num_visual_chunks": num_visual,
                     "kg_nodes": kg_nodes,
                     "kg_edges": kg_edges,
                     "vector_index_size": vs_size,
+                    "image_index_size": img_size,
                     "retrieval_ready": True,
                 }
 
-                # ── Phase 3: Hybrid retrieval + Summarization ─────────── #
+                # ── Phase 2.3: Unified chapter segmentation (local, no LLM) ──
+                results["chapters"] = []
+                if getattr(config, "enable_chapters", True):
+                    try:
+                        duration = (keyframe_data or {}).get("duration") \
+                            or (transcript or {}).get("duration", 0)
+                        results["chapters"] = segment_into_chapters(
+                            semantic_chunks,
+                            (keyframe_data or {}).get("scene_segments", []),
+                            duration,
+                            target_min_sec=getattr(config, "chapter_target_min_sec", 180),
+                            target_max_sec=getattr(config, "chapter_target_max_sec", 480),
+                        )
+                    except Exception as e:
+                        logger.warning(f"Chapter segmentation failed (non-fatal): {e}")
+
+                # ── Phase 3: Retrieval + summarisation ─────────────────── #
                 if progress_callback:
-                    progress_callback("Hybrid retrieval -> General summary...", 70)
+                    progress_callback("Summarising (map-reduce over chapters)...", 70)
                 t2 = time.time()
 
                 summary_length = options.get("summary_length", "medium")
+                has_gemini = bool(config.gemini_api_key or os.getenv("GEMINI_API_KEY"))
+                use_map_reduce = has_gemini and len(results["chapters"]) >= 2
+
+                # Always run retrieval so citations + retrieved-chunk views work; only run
+                # the per-chunk Gemini summary when NOT doing map-reduce (avoids a wasted call).
                 general_summary = await self._run_summarization_via_retrieval(
                     self.retrieval_engine,
                     topic=None,
                     summary_length=summary_length,
                     progress_callback=progress_callback,
+                    generate=not use_map_reduce,
                 )
+                if use_map_reduce:
+                    try:
+                        global_summary, filled_chapters = await self._map_reduce_summary(
+                            results["chapters"], semantic_chunks, summary_length
+                        )
+                        results["chapters"] = filled_chapters
+                        general_summary.update({
+                            "summary": global_summary.get("summary", ""),
+                            "key_points": global_summary.get("key_points", []),
+                            "summary_type": "gemini_map_reduce",
+                            "model": global_summary.get("model"),
+                            "word_count": global_summary.get("word_count", 0),
+                            "num_chapters": len(filled_chapters),
+                        })
+                    except Exception as e:
+                        logger.warning(f"Map-reduce summary failed ({e}); falling back to retrieval summary")
+                        if not general_summary.get("summary"):
+                            general_summary = await self._run_summarization_via_retrieval(
+                                self.retrieval_engine, topic=None,
+                                summary_length=summary_length, generate=True,
+                            )
                 results["summary"] = general_summary
+
+                # Persist chapters (titles/summaries now filled) for on-demand reuse + notes.
+                try:
+                    if results["chapters"]:
+                        os.makedirs(index_dir, exist_ok=True)
+                        import json as _json
+                        with open(os.path.join(index_dir, f"{video_id}_chapters.json"), "w",
+                                  encoding="utf-8") as f:
+                            _json.dump(results["chapters"], f, indent=2)
+                except Exception as e:
+                    logger.warning(f"save chapters failed (non-fatal): {e}")
 
                 topic = options.get("topic") or None
                 if topic:
@@ -311,10 +464,27 @@ class PipelineOrchestrator:
                     "timing_sec": round(phase3_time, 2),
                 }
 
-                # Citations from general retrieval
+                # Image channel: retrieve keyframes most relevant to the query (CLIP),
+                # rather than the old timestamp-proximity heuristic.
+                query_for_images = topic or "the most important visual moments in the video"
+                try:
+                    retrieved_keyframes = await self.retrieval_engine.retrieve_keyframes(
+                        query_for_images, k=8
+                    )
+                except Exception as e:
+                    logger.warning(f"Keyframe retrieval failed (non-fatal): {e}")
+                    retrieved_keyframes = []
+
+                results["retrieved_keyframes"] = retrieved_keyframes
+                pipeline_logs["phase3"]["image_query"] = query_for_images
+                pipeline_logs["phase3"]["image_retrieved_count"] = len(retrieved_keyframes)
+
+                # Citations from general retrieval — prefer CLIP-retrieved keyframes,
+                # fall back to timestamp proximity when the image channel is empty.
                 results["citations"] = self._build_citations(
                     general_summary.get("retrieval_scores", []),
                     keyframe_data,
+                    retrieved_keyframes=retrieved_keyframes,
                 )
 
             else:
@@ -322,6 +492,8 @@ class PipelineOrchestrator:
                 results["summary"] = {"summary": "RAG components unavailable.", "key_points": []}
                 results["topic_summary"] = None
                 results["citations"] = []
+                results["chapters"] = []
+                results["visual_chunks"] = []
                 pipeline_logs["phase2"] = {"error": "RAG components not initialised"}
                 pipeline_logs["phase3"] = {"error": "RAG components not initialised"}
 
@@ -337,6 +509,32 @@ class PipelineOrchestrator:
                 results["subtitles"] = subtitle_result
             else:
                 results["subtitles"] = None
+
+            # ── Phase 4.5: Chaptered downloadable MP4 + VTT chapters track ──
+            results["chaptered_video"] = None
+            if results.get("chapters"):
+                if progress_callback:
+                    progress_callback("Muxing chaptered video...", 94)
+                try:
+                    results["chaptered_video"] = await self._run_video_muxing(
+                        video_path, results, video_id
+                    )
+                except Exception as e:
+                    logger.warning(f"Video muxing failed (non-fatal): {e}")
+
+            # ── Phase 4.6: Structured chaptered notes (.md) ──
+            results["notes"] = None
+            if results.get("chapters") and all_chunks:
+                if progress_callback:
+                    progress_callback("Assembling chaptered notes...", 97)
+                try:
+                    notes_path = await self._run_notes_assembly(
+                        video_id, results, all_chunks, os.path.dirname(video_path)
+                    )
+                    if notes_path:
+                        results["notes"] = {"notes_path": notes_path}
+                except Exception as e:
+                    logger.warning(f"Notes assembly failed (non-fatal): {e}")
 
             results["pipeline_logs"] = pipeline_logs
 
@@ -387,6 +585,149 @@ class PipelineOrchestrator:
             logger.error(f"Keyframe extraction failed: {e}")
             return {}
 
+    async def _run_keyframes_and_classify(
+        self,
+        video_path: str,
+        video_id: str,
+        progress_callback: Optional[Callable] = None,
+    ) -> Dict[str, Any]:
+        """Phase 1 branch B: extract keyframes → CLIP embed → zero-shot classify → OCR.
+
+        Returns a bundle {keyframe_data, kept_kf, kept_embs, labels, ocr_by_kf}. The
+        CLIP+OCR work is offloaded to a thread so it overlaps transcription. Visual
+        chunk *building* (which needs the transcript for deixis) happens in Phase 2.1.
+        """
+        bundle: Dict[str, Any] = {
+            "keyframe_data": {}, "kept_kf": [], "kept_embs": None,
+            "labels": {}, "ocr_by_kf": {},
+        }
+        keyframe_data = await self._run_keyframe_extraction(
+            video_path, progress_callback, transcript=None
+        )
+        bundle["keyframe_data"] = keyframe_data or {}
+
+        keyframes = (keyframe_data or {}).get("keyframes", []) or []
+        if (
+            not keyframes
+            or not self.visual_enricher
+            or not self.vector_store
+            or not getattr(config, "enable_visual_enrichment", True)
+        ):
+            return bundle
+
+        for kf in keyframes:
+            kf.setdefault("video_id", video_id)
+
+        def _embed_classify_ocr():
+            kept, embs = self.vector_store.embed_keyframe_images(keyframes)
+            if not kept or embs is None:
+                return [], None, {}, {}
+            labels = self.visual_enricher.classify(kept, embs)
+            content = [
+                kf for kf in kept
+                if labels.get(kf.get("keyframe_id", ""), "unknown") in CONTENT_LABELS
+                or labels.get(kf.get("keyframe_id", ""), "unknown") == "unknown"
+            ]
+            ocr = self.visual_enricher.ocr_frames(content)
+            return kept, embs, labels, ocr
+
+        try:
+            if progress_callback:
+                progress_callback("Reading on-screen text (CLIP filter + OCR)...", 35)
+            kept, embs, labels, ocr = await asyncio.to_thread(_embed_classify_ocr)
+            bundle.update(
+                {"kept_kf": kept, "kept_embs": embs, "labels": labels, "ocr_by_kf": ocr}
+            )
+        except Exception as e:
+            logger.warning(f"Keyframe classify/OCR failed (non-fatal): {e}")
+        return bundle
+
+    def _build_and_embed_visual_chunks(
+        self,
+        kept_kf: List[Dict[str, Any]],
+        ocr_by_kf: Dict[str, str],
+        frame_labels: Dict[str, str],
+        transcript: Optional[Dict[str, Any]],
+        video_id: str,
+    ) -> List[Dict[str, Any]]:
+        """Build visual chunks from OCR text and embed them with the MiniLM model (no 2nd model)."""
+        if not self.visual_enricher or not ocr_by_kf or not kept_kf:
+            return []
+        try:
+            deixis = detect_visual_reference_moments(transcript)
+            chunks = self.visual_enricher.build_visual_chunks(
+                kept_kf, ocr_by_kf, frame_labels or {}, deixis, video_id
+            )
+            if not chunks:
+                return []
+            model = getattr(self.semantic_chunker, "model", None)
+            if model is None:
+                self.semantic_chunker.initialize()
+                model = self.semantic_chunker.model
+            embs = model.encode(
+                [c["text"] for c in chunks], convert_to_numpy=True, show_progress_bar=False
+            )
+            norms = np.linalg.norm(embs, axis=1, keepdims=True)
+            norms[norms == 0] = 1.0
+            embs = embs / norms
+            for i, c in enumerate(chunks):
+                c["embedding"] = embs[i].tolist()
+            return chunks
+        except Exception as e:
+            logger.warning(f"Visual chunk build/embed failed (non-fatal): {e}")
+            return []
+
+    async def _run_video_muxing(
+        self, video_path: str, results: Dict[str, Any], video_id: str
+    ) -> Optional[Dict[str, str]]:
+        """Phase 4.5 runner: write SRT to disk (if present) and mux a chaptered MP4."""
+        from pipeline.video_muxing import mux_chaptered_video
+
+        output_dir = os.path.dirname(video_path)
+        srt_path = None
+        subs = results.get("subtitles")
+        if isinstance(subs, dict) and subs.get("subtitles") and subs.get("format") == "srt":
+            srt_path = os.path.join(output_dir, "subtitles.srt")
+            try:
+                with open(srt_path, "w", encoding="utf-8") as f:
+                    f.write(subs["subtitles"])
+            except Exception as e:
+                logger.warning(f"Failed writing subtitles.srt for mux: {e}")
+                srt_path = None
+        return await asyncio.to_thread(
+            mux_chaptered_video, video_path, srt_path,
+            results.get("chapters") or [], output_dir, video_id,
+        )
+
+    async def _run_notes_assembly(
+        self,
+        video_id: str,
+        results: Dict[str, Any],
+        all_chunks: List[Dict[str, Any]],
+        output_dir: str,
+    ) -> Optional[str]:
+        """Phase 4.6 runner: assemble Markdown notes from this run's artifacts (no LLM call)."""
+        from pipeline.notes_assembler import NotesAssembler
+
+        kg_summary: Dict[str, Any] = {}
+        try:
+            if self.knowledge_graph and self.knowledge_graph.graph:
+                kg_summary = self.knowledge_graph.get_graph_summary()
+        except Exception:
+            kg_summary = {}
+
+        na = NotesAssembler()
+        md = na.assemble(
+            video_id, video_id,
+            results.get("chapters") or [],
+            all_chunks,
+            results.get("summary") or {},
+            results.get("citations") or [],
+            kg_summary,
+            results.get("retrieved_keyframes") or [],
+        )
+        return await asyncio.to_thread(na.save_notes, md, output_dir, video_id)
+
     async def _run_subtitle_generation(
         self,
         transcript: Optional[Dict[str, Any]],
@@ -415,8 +756,14 @@ class PipelineOrchestrator:
         topic: Optional[str] = None,
         summary_length: str = "medium",
         progress_callback: Optional[Callable] = None,
+        generate: bool = True,
     ) -> Dict[str, Any]:
-        """Summarise using ONLY hybrid-retrieved chunks — never the full transcript."""
+        """Summarise using ONLY hybrid-retrieved chunks — never the full transcript.
+
+        generate=False runs retrieval only (no Gemini call) and returns an empty
+        summary body — used when the caller will fill the summary via map-reduce but
+        still needs retrieval_scores/retrieved_chunks for citations and the UI.
+        """
         query = (
             topic
             if topic
@@ -468,22 +815,33 @@ class PipelineOrchestrator:
                 "dual-channel constraint degraded to vector-only."
             )
 
-        try:
-            result = await self._summarize_with_gemini(context_text, topic, summary_length)
-        except Exception as e:
-            logger.warning(f"Gemini failed ({e}); extractive fallback")
-            fallback_max = {"short": 3, "medium": 5, "long": 9}.get(summary_length, 5)
-            fallback_text = self._generate_extractive_summary(
-                context_text, max_sentences=fallback_max
-            )
+        if not generate:
+            # Retrieval-only: the caller (map-reduce) supplies the summary body.
             result = {
-                "summary": fallback_text,
+                "summary": "",
                 "key_points": [],
-                "summary_type": "extractive_fallback",
-                "model": "extractive",
-                "word_count": len(fallback_text.split()),
+                "summary_type": "retrieval_only",
+                "model": None,
+                "word_count": 0,
                 "summary_length": summary_length,
             }
+        else:
+            try:
+                result = await self._summarize_with_gemini(context_text, topic, summary_length)
+            except Exception as e:
+                logger.warning(f"Gemini failed ({e}); extractive fallback")
+                fallback_max = {"short": 3, "medium": 5, "long": 9}.get(summary_length, 5)
+                fallback_text = self._generate_extractive_summary(
+                    context_text, max_sentences=fallback_max
+                )
+                result = {
+                    "summary": fallback_text,
+                    "key_points": [],
+                    "summary_type": "extractive_fallback",
+                    "model": "extractive",
+                    "word_count": len(fallback_text.split()),
+                    "summary_length": summary_length,
+                }
 
         result["retrieved_chunk_count"] = len(sorted_chunks)
         result["retrieval_scores"] = [
@@ -585,6 +943,145 @@ KEY POINTS ({profile["kp_label"]}):
         }
 
     # ------------------------------------------------------------------ #
+    # Hierarchical map-reduce summarisation (long-range coverage)          #
+    # ------------------------------------------------------------------ #
+
+    async def _gemini_text(self, prompt: str) -> str:
+        """Single Gemini text call. Raises if no API key is configured."""
+        import google.generativeai as genai
+
+        api_key = config.gemini_api_key or os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise Exception("GEMINI_API_KEY not configured")
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+        response = await asyncio.to_thread(model.generate_content, prompt)
+        return (response.text or "").strip()
+
+    @staticmethod
+    def _parse_titled_summary(raw: str):
+        """Parse optional TITLE + SUMMARY + KEY POINTS. Returns (title, summary, key_points)."""
+        title, summary, kps = "", "", []
+        if "TITLE:" in raw:
+            title = raw.split("TITLE:", 1)[1].split("\n", 1)[0].strip()
+        if "SUMMARY:" in raw and "KEY POINTS" in raw:
+            parts = raw.split("KEY POINTS", 1)
+            seg = parts[0]
+            summary = seg.split("SUMMARY:", 1)[1].strip() if "SUMMARY:" in seg else seg.strip()
+            bullets_block = parts[1].split("\n", 1)[1] if "\n" in parts[1] else parts[1]
+            kps = [
+                b.lstrip("- •*").strip()
+                for b in bullets_block.strip().split("\n")
+                if b.strip() and b.strip() not in ("-", "•", "*")
+            ]
+        elif "SUMMARY:" in raw:
+            summary = raw.split("SUMMARY:", 1)[1].strip()
+        else:
+            summary = raw.strip()
+        return title, summary, kps
+
+    async def _gemini_chapter_summary(self, text: str, summary_length: str) -> Dict[str, Any]:
+        """MAP step: summarise one chapter's chunks (transcript + on-screen text)."""
+        text_slice = text[:8000]
+        prompt = f"""You are summarizing one section of a video. The text may include
+on-screen content marked like "[On-screen code at 42s]" — treat that as what was
+shown on screen (e.g. code, slides, diagrams) and incorporate it.
+
+Respond in exactly this format (no extra text):
+
+TITLE: <concise section title, at most 8 words>
+SUMMARY: <2-3 sentences, third person, specific about what is taught or shown>
+KEY POINTS:
+- <point 1>
+- <point 2>
+- <point 3>
+
+SECTION:
+{text_slice}"""
+        raw = await self._gemini_text(prompt)
+        title, summary, kps = self._parse_titled_summary(raw)
+        return {"title": title, "summary": summary, "key_points": kps}
+
+    async def _gemini_reduce_summary(
+        self, chapters: List[Dict[str, Any]], summary_length: str
+    ) -> Dict[str, Any]:
+        """REDUCE step: synthesise chapter summaries into one global summary."""
+        profile = self.LENGTH_PROFILES.get(summary_length, self.LENGTH_PROFILES["medium"])
+        outline = "\n".join(
+            f"- [{c.get('title','')}] {c.get('summary','')}" for c in chapters
+        )[:14000]
+        bullets_template = "\n".join(f"- <key point {i+1}>" for i in range(profile["kp_count"]))
+        prompt = f"""You are writing the overall summary of a video from its chapter summaries.
+Capture the through-line and how ideas connect across the WHOLE video, not just one part.
+
+CHAPTER SUMMARIES (in order):
+{outline}
+
+Respond in exactly this format (no extra text):
+
+SUMMARY:
+<{profile['paragraphs']} summary in third person, covering the full video.>
+
+KEY POINTS ({profile['kp_label']}):
+{bullets_template}"""
+        raw = await self._gemini_text(prompt)
+        _, summary, kps = self._parse_titled_summary(raw)
+        return {
+            "summary": summary,
+            "key_points": kps,
+            "summary_type": "gemini_map_reduce",
+            "model": "gemini-2.5-flash-lite",
+            "summary_length": summary_length,
+            "word_count": len(summary.split()),
+        }
+
+    async def _map_reduce_summary(
+        self,
+        chapters: List[Dict[str, Any]],
+        semantic_chunks: List[Dict[str, Any]],
+        summary_length: str,
+    ):
+        """MAP per chapter (bounded concurrency) → REDUCE into a global summary.
+
+        Returns (global_summary_dict, chapters_with_titles_and_summaries).
+        """
+        by_time = sorted(semantic_chunks, key=lambda c: c.get("time_start", 0.0))
+        sem = asyncio.Semaphore(max(1, int(getattr(config, "map_reduce_concurrency", 3))))
+
+        async def _map_one(ch: Dict[str, Any]) -> Dict[str, Any]:
+            lo = float(ch.get("start_sec", 0.0))
+            hi = float(ch.get("end_sec", lo))
+            ids = set(ch.get("chunk_ids", []))
+            parts = [
+                c["text"] for c in by_time
+                if (lo <= float(c.get("time_start", 0.0)) < hi) or c.get("chunk_id") in ids
+            ]
+            text = " ".join(parts).strip()
+            default_title = f"Chapter {int(ch.get('index', 0)) + 1}"
+            if not text:
+                ch.setdefault("title", default_title)
+                ch.setdefault("summary", "")
+                ch.setdefault("key_points", [])
+                return ch
+            try:
+                async with sem:
+                    res = await self._gemini_chapter_summary(text, summary_length)
+                ch["title"] = res.get("title") or default_title
+                ch["summary"] = res.get("summary", "")
+                ch["key_points"] = res.get("key_points", [])
+            except Exception as e:
+                logger.warning(f"Chapter {ch.get('index')} summary failed: {e}")
+                ch.setdefault("title", default_title)
+                ch.setdefault("summary", "")
+                ch.setdefault("key_points", [])
+            return ch
+
+        filled = await asyncio.gather(*[_map_one(ch) for ch in chapters])
+        filled = sorted(filled, key=lambda c: c.get("index", 0))
+        global_summary = await self._gemini_reduce_summary(filled, summary_length)
+        return global_summary, list(filled)
+
+    # ------------------------------------------------------------------ #
     # Citation assembly                                                    #
     # ------------------------------------------------------------------ #
 
@@ -592,8 +1089,16 @@ KEY POINTS ({profile["kp_label"]}):
         self,
         retrieval_scores: List[Dict[str, Any]],
         keyframe_data: Dict[str, Any],
+        retrieved_keyframes: Optional[List[Dict[str, Any]]] = None,
     ) -> List[Dict[str, Any]]:
         keyframes = keyframe_data.get("keyframes", []) if keyframe_data else []
+
+        # Index CLIP-retrieved keyframes by timestamp so a text chunk can be paired
+        # with the visually-relevant frame nearest its time window. Falls back to the
+        # full keyframe set (timestamp proximity only) when the image channel is empty.
+        clip_kfs = retrieved_keyframes or []
+        candidate_kfs = clip_kfs if clip_kfs else keyframes
+
         citations: List[Dict[str, Any]] = []
 
         for item in retrieval_scores[:15]:
@@ -603,13 +1108,18 @@ KEY POINTS ({profile["kp_label"]}):
 
             kf_timestamp = None
             kf_path = None
+            kf_image_score = None
             best_dist = float("inf")
-            for kf in keyframes:
+            for kf in candidate_kfs:
                 dist = abs(kf.get("timestamp", 0) - ts)
-                if dist < best_dist and dist <= 2.0:
+                # CLIP-retrieved frames are already relevance-filtered, so allow a
+                # wider temporal window for them than the raw 2s proximity gate.
+                window = 30.0 if clip_kfs else 2.0
+                if dist < best_dist and dist <= window:
                     best_dist = dist
                     kf_timestamp = kf.get("timestamp")
                     kf_path = kf.get("frame_path")
+                    kf_image_score = kf.get("image_score")
 
             citations.append(
                 {
@@ -620,6 +1130,7 @@ KEY POINTS ({profile["kp_label"]}):
                     "relevance_score": item.get("score", 0),
                     "keyframe_timestamp": kf_timestamp,
                     "keyframe_path": kf_path,
+                    "keyframe_image_score": kf_image_score,
                 }
             )
 

@@ -38,6 +38,12 @@ Pillow
 ffmpeg-python
 imagehash>=4.3.1
 
+# OCR for on-screen text/code (local, free). Needs the `tesseract` binary:
+#   macOS: brew install tesseract
+pytesseract>=0.3.10
+# Optional higher-accuracy OCR backend (uses existing torch); set ocr_engine=easyocr
+# easyocr>=1.7.0
+
 # Text processing
 nltk
 pandas
