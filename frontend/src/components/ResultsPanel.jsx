@@ -163,7 +163,6 @@ const PanelStyles = () => (
 
     /* Caption overlay (in-app karaoke / flashy styles) */
     .rp-cap-overlay { position: absolute; inset: 0; pointer-events: none; display: flex; align-items: flex-end; justify-content: center; padding: 0 6% 7%; z-index: 2; }
-    .rp-cap-overlay--tiktok { align-items: center; padding-bottom: 6%; }
     .rp-cap { max-width: 94%; text-align: center; line-height: 1.32; }
     .rp-cap span { display: inline-block; }
 
@@ -187,14 +186,6 @@ const PanelStyles = () => (
     }
     .rp-cap--clean span { padding: 0 3px; transition: color 0.12s ease; }
     .rp-cap--clean span.active { color: #fff; font-weight: 700; }
-
-    .rp-cap--tiktok {
-      font-family: 'DM Sans', sans-serif; font-weight: 800; font-size: clamp(1.4rem, 5.5vw, 3rem);
-      text-transform: uppercase; letter-spacing: 0.02em; display: flex; gap: 0.35em; justify-content: center; flex-wrap: wrap;
-    }
-    .rp-cap--tiktok span { color: #fff; -webkit-text-stroke: 2px #000; text-shadow: 0 3px 0 rgba(0,0,0,0.85), 0 0 18px rgba(0,0,0,0.7); transition: transform 0.1s ease; }
-    .rp-cap--tiktok span.active { color: #f0d070; transform: scale(1.16); animation: rpCapPop 0.22s cubic-bezier(0.22,1.4,0.4,1); }
-    @keyframes rpCapPop { 0% { transform: scale(0.72); } 100% { transform: scale(1.16); } }
 
     /* Summary */
     .rp-summary-layout { display: grid; grid-template-columns: 1fr; gap: 16px; }
@@ -303,7 +294,6 @@ const PanelStyles = () => (
 const CAPTION_STYLES = [
   { id: 'classic', label: 'Classic' },
   { id: 'karaoke', label: 'Karaoke' },
-  { id: 'tiktok',  label: 'TikTok'  },
   { id: 'clean',   label: 'Clean'   },
 ];
 
@@ -358,22 +348,13 @@ const CaptionOverlay = ({ videoRef, segments, styleId }) => {
 
   const activeIdx = words.findIndex(w => t >= w.start && t < w.end);
 
-  // TikTok: show a 3-word window centred on the active word for the punchy look.
-  let view = words, viewActive = activeIdx;
-  if (styleId === 'tiktok') {
-    const center = activeIdx >= 0 ? activeIdx : 0;
-    const start = Math.max(0, Math.min(center - 1, words.length - 3));
-    view = words.slice(start, start + 3);
-    viewActive = (activeIdx >= 0 ? activeIdx : -1) - start;
-  }
-
   return (
     <div className={`rp-cap-overlay rp-cap-overlay--${styleId}`}>
       <div className={`rp-cap rp-cap--${styleId}`}>
         {styleId === 'classic'
           ? seg.text
-          : view.map((w, i) => {
-              const cls = i === viewActive ? 'active' : (activeIdx >= 0 && words.indexOf(w) < activeIdx ? 'spoken' : '');
+          : words.map((w, i) => {
+              const cls = i === activeIdx ? 'active' : (activeIdx >= 0 && i < activeIdx ? 'spoken' : '');
               return <span key={i} className={cls}>{w.text}{' '}</span>;
             })}
       </div>
