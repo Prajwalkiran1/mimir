@@ -356,6 +356,12 @@ const ResultsPanel = ({
                 <button onClick={() => onDownload('subtitles')} className="rp-icon-btn" title="Download subtitles">
                   <Download size={14} />
                 </button>
+                {results.subtitles_vtt_url && taskId && (
+                  <a href={`/api/v1/download/subtitled-video/${taskId}`} download
+                    className="rp-icon-btn" title="Download video with subtitles">
+                    <Play size={14} />
+                  </a>
+                )}
               </div>
             </div>
             <div className="rp-panel-body">
